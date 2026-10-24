@@ -5,8 +5,9 @@
   "scripts": {
     "start": "node scripts/serve.cjs",
     "test": "node --test tests/*.test.cjs",
-    "check": "node --check app/core.js && node --check app/player.js && node --check app/app.js",
-    "package": "node scripts/package.cjs"
+    "check": "node scripts/check.cjs",
+    "package": "node scripts/package.cjs",
+    "release": "node scripts/release.cjs"
   },
   "dependencies": {
     "hls.js": "1.7.3"
@@ -14,5 +15,8 @@
   "license": "MIT",
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "yaml": "2.9.1"
   }
 }
