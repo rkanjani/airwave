@@ -22,6 +22,18 @@ Samsung target is Tizen 6.0+. Physical iOS and Samsung TV playback remain unveri
 
 Apple apps bundle the interface and connect directly to the provider; they do not depend on the local web server. Native catalog credentials never enter the web view. Native artwork currently uses original placeholder artwork. The web relay keeps provider credentials out of the browser library payload. Web and Apple catalogs are private, device-local copies; there is no cloud synchronization.
 
+## Development
+
+Start with `AGENTS.md` and [the project map](docs/PROJECT.md) for architecture, data contracts and known debt.
+
+```sh
+npm ci --ignore-scripts
+npm run check
+npm run release
+```
+
+The check runs 19 active tests plus one pending Samsung version-parity expectation. The release command creates a static runtime archive in `dist/`, with no private catalog or Node relay.
+
 ## Run the web app
 
 Requires Node 18+. HLS.js is bundled with its license. `npm ci` restores the pinned development dependency.
@@ -95,3 +107,7 @@ Run `npm run check` before calling a change done. See `VERIFICATION.md` for obse
 - [Apple AVPlayer](https://developer.apple.com/documentation/avfoundation/avplayer)
 
 Provider subscriptions remain with their providers.
+
+## License
+
+Original code and artwork: [MIT](LICENSE). Third-party and media notices: [NOTICE.md](NOTICE.md).
