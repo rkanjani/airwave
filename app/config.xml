@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<widget xmlns="http://www.w3.org/ns/widgets" xmlns:tizen="http://tizen.org/ns/widgets" id="https://airwave.local/tv" version="0.1.0" viewmodes="maximized">
+  <tizen:application id="AirwaveTV1.Airwave" package="AirwaveTV1" required_version="6.0"/>
+  <content src="index.html"/><name>Airwave</name><icon src="assets/icon.png"/>
+  <tizen:profile name="tv-samsung"/>
+  <tizen:privilege name="http://tizen.org/privilege/internet"/>
+  <tizen:privilege name="http://tizen.org/privilege/tv.inputdevice"/>
+  <access origin="*" subdomains="true"/>
+  <tizen:content-security-policy>default-src 'self'; script-src 'self' $WEBAPIS; style-src 'self' 'unsafe-inline'; img-src 'self' https: http: data:; media-src 'self' https: http: blob:; connect-src https: http:; object-src 'self'; base-uri 'self'</tizen:content-security-policy>
+  <tizen:setting screen-orientation="landscape" context-menu="disable" background-support="disable" encryption="disable" install-location="auto" hwkey-event="enable"/>
+  <tizen:metadata key="http://samsung.com/tv/metadata/prelaunch.support" value="false"/>
+</widget>

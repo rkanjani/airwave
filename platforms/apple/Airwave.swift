@@ -1,0 +1,249 @@
+import SwiftUI
+import WebKit
+import AVKit
+import CryptoKit
+import Security
+import UniformTypeIdentifiers
+
+@main
+struct AirwaveApp: App {
+    @StateObject private var model = AirwaveModel()
+    @Environment(\.scenePhase) private var scenePhase
+    var body: some Scene {
+        WindowGroup {
+            ZStack {
+                AirwaveWebView(model: model)
+                if let player = model.player {
+                    ZStack(alignment: .topLeading) {
+                        Color.black.ignoresSafeArea()
+                        AirwaveVideoView(player: player).ignoresSafeArea()
+                        Button { model.stop() } label: { Label("Back to Airwave", systemImage: "chevron.left").padding(12) }
+                            .buttonStyle(.borderedProminent).tint(.black.opacity(0.7)).padding(24)
+                    }
+                }
+            }
+            .preferredColorScheme(.dark)
+            .onChange(of: scenePhase) { phase in if phase == .background { model.stop() } }
+            #if os(macOS)
+            .frame(minWidth: 800, minHeight: 550)
+            #endif
+        }
+        #if os(macOS)
+        .defaultSize(width: 1280, height: 800)
+        #endif
+    }
+}
+
+// The web bundle is the only document permitted to call the native bridge.
+// Provider credentials stay in the native catalog; JavaScript receives opaque media IDs.
+@MainActor
+final class AirwaveModel: NSObject, ObservableObject, WKScriptMessageHandler, WKNavigationDelegate {
+    @Published var player: AVPlayer?
+    weak var webView: WKWebView?
+    private var catalog: [String: Any]?
+    private var media: [String: [String: Any]] = [:]
+    private var timeObserver: Any?
+    private var statusObserver: NSKeyValueObservation?
+    private var playbackObserver: NSKeyValueObservation?
+    private var endObserver: NSObjectProtocol?
+    private var playToken = 0
+    private var documentDelegate: AnyObject?
+    private let store = PrivateCatalogStore()
+    private var networkTasks: [String: Task<Void, Never>] = [:]
+
+    func configure(_ view: WKWebView) {
+        webView = view
+        view.navigationDelegate = self
+        guard let url = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: "app") else { return }
+        view.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+    }
+    func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        let allowed = action.request.url?.isFileURL == true && action.request.url?.standardizedFileURL.path.hasPrefix(Bundle.main.bundleURL.path) == true
+        decisionHandler(allowed ? .allow : .cancel)
+    }
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.frameInfo.isMainFrame, message.frameInfo.request.url?.isFileURL == true,
+              let body = message.body as? [String: Any], let id = body["id"] as? String, let action = body["action"] as? String else { return }
+        let payload = body["payload"] as? [String: Any] ?? [:]
+        switch action {
+        case "library":
+            do { if catalog == nil, let saved = try store.read() { try loadCatalog(saved) }; reply(id, result: catalog == nil ? NSNull() : snapshot()) }
+            catch { reply(id, error: "The encrypted library could not be opened. Import it again from Settings.") }
+        case "importLibrary": chooseLibrary(id)
+        case "play":
+            guard let key = payload["id"] as? String else { return reply(id, error: "Missing media identifier.") }
+            var raw = media[key]?["url"] as? String ?? payload["url"] as? String ?? ""
+            if media[key]?["kind"] as? String == "live" { raw = raw.replacingOccurrences(of: ".ts?", with: ".m3u8?"); if raw.hasSuffix(".ts") { raw = String(raw.dropLast(3)) + ".m3u8" } }
+            guard let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return reply(id, error: "Unsupported media URL.") }
+            start(url, resume: payload["resume"] as? Double ?? 0, token: payload["token"] as? Int ?? 0)
+            reply(id, result: true)
+        case "stop": stop(); reply(id, result: true)
+        case "toggle": if player?.rate == 0 { player?.play() } else { player?.pause() }; reply(id, result: true)
+        case "seek":
+            if let p = player, let duration = p.currentItem?.duration.seconds, duration.isFinite, duration > 0 {
+                let next = max(0, min(duration - 0.5, p.currentTime().seconds + (payload["delta"] as? Double ?? 0)))
+                p.seek(to: CMTime(seconds: next, preferredTimescale: 600))
+            }
+            reply(id, result: true)
+        case "fetchText":
+            guard let raw = payload["url"] as? String, let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return reply(id, error: "Unsupported source URL.") }
+            let maxBytes = min(payload["max"] as? Int ?? 5_242_880, 10_485_760)
+            networkTasks[id] = Task { [weak self] in
+                defer { self?.networkTasks.removeValue(forKey: id) }
+                do {
+                    var request = URLRequest(url: url); request.timeoutInterval = 20
+                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                    guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode), response.expectedContentLength <= maxBytes else { throw URLError(.badServerResponse) }
+                    var data = Data(); for try await byte in bytes { if data.count >= maxBytes { throw URLError(.dataLengthExceedsMaximum) }; data.append(byte) }
+                    self?.reply(id, result: String(decoding: data, as: UTF8.self))
+                } catch { self?.reply(id, error: "The source could not be loaded. Check the URL, connection, and file size.") }
+            }
+        default: reply(id, error: "Unsupported native action.")
+        }
+    }
+    private func reply(_ id: String, result: Any = NSNull(), error: String? = nil) {
+        guard let data = try? JSONSerialization.data(withJSONObject: [id, result, error as Any? ?? NSNull()], options: [.fragmentsAllowed]), let args = String(data: data, encoding: .utf8) else { return }
+        webView?.evaluateJavaScript("window.__airwaveNativeReply.apply(null,\(args))", completionHandler: nil)
+    }
+    private func emit(_ event: String, _ value: Any = NSNull(), token: Int? = nil) {
+        guard let data = try? JSONSerialization.data(withJSONObject: [event, value, token ?? playToken], options: [.fragmentsAllowed]), let args = String(data: data, encoding: .utf8) else { return }
+        webView?.evaluateJavaScript("window.__airwaveNativePlayback && window.__airwaveNativePlayback.apply(null,\(args))", completionHandler: nil)
+    }
+    private func start(_ url: URL, resume: Double, token: Int) {
+        stop(notify: false); playToken = token
+        let item = AVPlayerItem(url: url), p = AVPlayer(playerItem: item)
+        player = p
+        statusObserver = item.observe(\.status, options: [.new, .initial]) { [weak self, weak item] _, _ in
+            Task { @MainActor in
+                guard let self, self.playToken == token, let item else { return }
+                if item.status == .failed { self.emit("error", "This stream or codec cannot be played by Apple AVPlayer.", token: token); self.stop(notify: false) }
+                else if item.status == .readyToPlay, resume > 0, item.duration.seconds.isFinite, resume < item.duration.seconds { self.player?.seek(to: CMTime(seconds: resume, preferredTimescale: 600)) }
+            }
+        }
+        playbackObserver = p.observe(\.timeControlStatus, options: [.new]) { [weak self] p, _ in
+            let status = p.timeControlStatus
+            Task { @MainActor in guard let self, self.playToken == token else { return }; self.emit(status == .playing ? "playing" : status == .paused ? "paused" : "loading", status == .waitingToPlayAtSpecifiedRate ? "Buffering…" as Any : NSNull(), token: token) }
+        }
+        timeObserver = p.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1, preferredTimescale: 600), queue: .main) { [weak self, weak p] time in
+            Task { @MainActor in
+                guard let self, self.playToken == token else { return }
+                let duration = p?.currentItem?.duration.seconds ?? 0
+                self.emit("time", ["time": time.seconds.isFinite ? time.seconds : 0, "duration": duration.isFinite ? duration : 0], token: token)
+            }
+        }
+        endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in Task { @MainActor in guard let self, self.playToken == token else { return }; self.emit("ended", token: token); self.stop(notify: false) } }
+        p.play()
+    }
+    func stop(notify: Bool = true) {
+        let oldToken = playToken
+        playToken = -1
+        if let observer = timeObserver, let p = player { p.removeTimeObserver(observer) }
+        timeObserver = nil; statusObserver = nil; playbackObserver = nil
+        if let observer = endObserver { NotificationCenter.default.removeObserver(observer) }; endObserver = nil
+        player?.pause(); player?.replaceCurrentItem(with: nil); player = nil
+        if notify { emit("native-closed", token: oldToken) }
+    }
+    private func loadCatalog(_ data: Data) throws {
+        guard data.count <= 100_000_000, let json = try JSONSerialization.jsonObject(with: data) as? [String: Any], let items = json["items"] as? [[String: Any]], !items.isEmpty, items.count <= 200_000 else { throw CocoaError(.fileReadCorruptFile) }
+        var accepted: [String: [String: Any]] = [:]
+        for item in items {
+            guard let id = item["id"] as? String, let raw = item["url"] as? String, let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? ""), item["name"] is String, ["live", "movie"].contains(item["kind"] as? String ?? "") else { continue }
+            accepted[id] = item
+        }
+        guard !accepted.isEmpty else { throw CocoaError(.fileReadCorruptFile) }
+        catalog = json; media = accepted
+    }
+    private func snapshot() -> [String: Any] {
+        let order = catalog?["items"] as? [[String: Any]] ?? []
+        let items = order.compactMap { item -> [String: Any]? in
+            guard let id = item["id"] as? String, media[id] != nil else { return nil }
+            var safe = item
+            safe.removeValue(forKey: "source")
+            safe["url"] = "airwave-native://" + id
+            // Artwork is optional. Keep the provider URLs entirely in native storage.
+            safe["logo"] = ""
+            return safe
+        }
+        return ["version": 2, "private": true, "name": catalog?["name"] as? String ?? "My library", "items": items]
+    }
+    private func importFile(_ url: URL, replyID: String) {
+        let scoped = url.startAccessingSecurityScopedResource(); defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let previousCatalog = catalog, previousMedia = media
+        do {
+            let data = try Data(contentsOf: url, options: [.mappedIfSafe]); try loadCatalog(data); try store.write(data)
+            reply(replyID, result: snapshot())
+        } catch { catalog = previousCatalog; media = previousMedia; reply(replyID, error: "This library could not be imported or securely saved. Choose a valid Airwave library JSON file.") }
+    }
+    private func chooseLibrary(_ id: String) {
+        #if os(macOS)
+        let panel = NSOpenPanel(); panel.allowedContentTypes = [.json]; panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
+        panel.begin { [weak self] response in Task { @MainActor in if response == .OK, let url = panel.url { self?.importFile(url, replyID: id) } else { self?.reply(id, error: "Import cancelled.") } } }
+        #else
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.json], asCopy: true)
+        let delegate = ImportDelegate { [weak self] url in if let url { self?.importFile(url, replyID: id) } else { self?.reply(id, error: "Import cancelled.") }; self?.documentDelegate = nil }
+        documentDelegate = delegate; picker.delegate = delegate
+        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene, let root = scene.windows.first(where: \.isKeyWindow)?.rootViewController else { return reply(id, error: "File picker unavailable.") }
+        root.present(picker, animated: true)
+        #endif
+    }
+}
+#if os(iOS)
+@MainActor final class ImportDelegate: NSObject, UIDocumentPickerDelegate {
+    let completion: (URL?) -> Void
+    init(_ completion: @escaping (URL?) -> Void) { self.completion = completion }
+    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { completion(urls.first) }
+    func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { completion(nil) }
+}
+#endif
+
+struct PrivateCatalogStore {
+    private let service = "app.airwave.private-catalog"
+    private func key() throws -> SymmetricKey {
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: "encryption-key"]
+        var result: CFTypeRef?
+        var lookup = query; lookup[kSecReturnData as String] = true
+        let status = SecItemCopyMatching(lookup as CFDictionary, &result)
+        if status == errSecSuccess, let data = result as? Data { return SymmetricKey(data: data) }
+        guard status == errSecItemNotFound else { throw CocoaError(.fileReadNoPermission) }
+        let key = SymmetricKey(size: .bits256), data = key.withUnsafeBytes { Data($0) }
+        var insert = query; insert[kSecValueData as String] = data
+        insert[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        guard SecItemAdd(insert as CFDictionary, nil) == errSecSuccess else { throw CocoaError(.fileWriteNoPermission) }
+        return key
+    }
+    private var file: URL { get throws {
+        let base = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("Airwave", isDirectory: true)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        return base.appendingPathComponent("library.encrypted")
+    } }
+    func read() throws -> Data? { let url = try file; guard FileManager.default.fileExists(atPath: url.path) else { return nil }; return try AES.GCM.open(AES.GCM.SealedBox(combined: Data(contentsOf: url)), using: key()) }
+    func write(_ data: Data) throws { let sealed = try AES.GCM.seal(data, using: key()); guard let bytes = sealed.combined else { throw CocoaError(.fileWriteUnknown) }; let url = try file; try bytes.write(to: url, options: [.atomic]); try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path) }
+}
+
+#if os(macOS)
+struct AirwaveWebView: NSViewRepresentable {
+    let model: AirwaveModel
+    func makeNSView(context: Context) -> WKWebView { let configuration = WKWebViewConfiguration(); configuration.userContentController.add(model, name: "airwave"); let view = WKWebView(frame: .zero, configuration: configuration); model.configure(view); return view }
+    func updateNSView(_ view: WKWebView, context: Context) {}
+}
+#else
+struct AirwaveWebView: UIViewRepresentable {
+    let model: AirwaveModel
+    func makeUIView(context: Context) -> WKWebView { let configuration = WKWebViewConfiguration(); configuration.allowsInlineMediaPlayback = true; configuration.userContentController.add(model, name: "airwave"); let view = WKWebView(frame: .zero, configuration: configuration); view.scrollView.contentInsetAdjustmentBehavior = .never; model.configure(view); return view }
+    func updateUIView(_ view: WKWebView, context: Context) {}
+}
+#endif
+
+#if os(macOS)
+struct AirwaveVideoView: NSViewRepresentable {
+    let player: AVPlayer
+    func makeNSView(context: Context) -> AVPlayerView { let view = AVPlayerView(); view.player = player; view.controlsStyle = .floating; return view }
+    func updateNSView(_ view: AVPlayerView, context: Context) { if view.player !== player { view.player = player } }
+}
+#else
+struct AirwaveVideoView: UIViewControllerRepresentable {
+    let player: AVPlayer
+    func makeUIViewController(context: Context) -> AVPlayerViewController { let view = AVPlayerViewController(); view.player = player; return view }
+    func updateUIViewController(_ view: AVPlayerViewController, context: Context) { if view.player !== player { view.player = player } }
+}
+#endif

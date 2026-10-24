@@ -1,0 +1,11 @@
+node_modules/
+build/
+dist/
+.DS_Store
+*.xcuserstate
+xcuserdata/
+*.p12
+*.jks
+*.encrypted
+*private*library*.json
+.env*
