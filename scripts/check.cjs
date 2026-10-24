@@ -18,6 +18,8 @@ function walk(directory) {
 }
 for (const file of ['app', 'server', 'scripts', 'tests'].flatMap(walk).filter(x => /\.(c?js)$/.test(x))) run(process.execPath, ['--check', file]);
 for (const file of files) assert.ok(fs.statSync(path.join('app', file)).isFile(), 'Missing runtime file: ' + file);
+function runtimeTree(dir) { return fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? runtimeTree(path.join(dir, entry.name)) : [path.relative('app', path.join(dir, entry.name)).split(path.sep).join('/')]); }
+assert.deepEqual(runtimeTree('app').sort(), [...files].sort(), 'Apple bundles app/ in full: unexpected runtime files must be removed or explicitly allowlisted');
 const html = fs.readFileSync('app/index.html', 'utf8');
 for (const match of html.matchAll(/(?:src|href)="([^"]+)"/g)) {
   if (!/^(?:https?:|#)/.test(match[1])) assert.ok(files.includes(match[1]), 'HTML reference missing from release: ' + match[1]);

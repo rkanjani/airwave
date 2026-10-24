@@ -11,7 +11,13 @@ test('release staging contains only approved runtime files and license notices',
   finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 // Bootstrap keeps runtime behavior fixed; resolve this in a release-version change.
-test('Samsung, npm and Apple marketing versions agree', { todo: 'Samsung manifest remains 0.1.0 while npm and Apple are 0.2.0; see docs/PROJECT.md' }, () => {
+test('Samsung and npm marketing versions agree', { todo: 'Samsung manifest remains 0.1.0 while npm and Apple are 0.2.0; see docs/PROJECT.md' }, () => {
   const tv = fs.readFileSync(path.join(__dirname, '../app/config.xml'), 'utf8').match(/<widget\b[^>]*\bversion="([^"]+)"/)[1];
   assert.equal(tv, require('../package.json').version);
+});
+
+test('Apple and npm marketing versions agree', () => {
+  const plist = fs.readFileSync(path.join(__dirname, '../platforms/apple/Info.plist'), 'utf8');
+  const apple = plist.match(/<key>CFBundleShortVersionString<\/key>\s*<string>([^<]+)<\/string>/)[1];
+  assert.equal(apple, require('../package.json').version);
 });

@@ -18,7 +18,7 @@ Read `docs/PROJECT.md` before changing platform boundaries, storage, packaging, 
 - `app/platform.js`, `app/player.js`: JavaScript adapter contracts; tests in `tests/platform.test.cjs` and `tests/player.test.cjs`.
 - `server/library.cjs`, `server/network.cjs`: opaque media registry, HLS rewriting and outbound request boundaries; tests in `tests/library.test.cjs`.
 - `platforms/apple/`: two shared Xcode schemes, Swift shell and plist.
-- `scripts/runtime-files.cjs`: explicit release allowlist; update this when adding a runtime asset. The vendor bundle and license remain unmodified.
+- `scripts/runtime-files.cjs`: explicit web/Tizen release allowlist; update this when adding a runtime asset. Apple bundles the whole `app/` directory, whose contents the check verifies against that same list. The vendor bundle and license remain unmodified.
 
 ## Contracts to preserve
 

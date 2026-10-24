@@ -78,7 +78,9 @@ CI runs on GitHub Actions. There is no analytics, cloud-sync or Airwave account 
 - Private migration catalog: `{version: 2, name, items}`; optional source metadata stays
   in the private file. Items have stable `id`, `name`, HTTP(S) `url`, `kind: live|movie`,
   and optional `group`, `logo`, `epgId`, `favorite`, `color` fields. Native import accepts
-  up to 100 MB/200,000 entries and validates the playable-item shape.
+  up to 100 MB/200,000 entries and validates the playable-item shape. These are declared
+  contracts: current importers do not enforce the `version` value; Apple skips invalid
+  entries and supplies a fallback name. Web input is assumed to be a trusted local export.
 - The web relay strips upstream URLs from snapshots and rewrites HLS playlists, keys,
   initialization maps and segment URLs to registered opaque resources. Dynamic resources
   are bounded at 10,000; original catalog resources remain registered.
@@ -103,6 +105,7 @@ no earlier Git history, tag, merged PR or removal record to reconstruct here.
 | 2026-10-24 | Imported the shared player, local relay and Apple targets at npm version 0.2.0; retained existing development limitations | `ffeb7ff` |
 | 2026-10-24 | Added MIT terms and ignores for private data, signing artifacts and per-machine state | `ef62c8e` |
 | 2026-10-24 | Added one local/CI check, native bridge characterization, a pending version-parity test and allowlisted packaging | `f07a459` |
+| 2026-10-24 | Added the operational agent guide and product/history map | `8d00680` |
 
 The initial import is evidence of the current implementation, not a claim that all its
 features were originally written in that commit. Pre-import observations are recorded
@@ -140,7 +143,7 @@ catalogs, device exports, user-specific verification details or credential-beari
    claiming native Samsung playback. This is a source-derived risk, not a reproduced device failure.
 3. Physical Samsung/iPhone playback, remote behavior, certificates and store distribution
    remain unverified. The Apple build commands compile without signing; no CI Apple job exists.
-4. Series episode resolution, provider refresh/login UI, guide population, catch-up, DVR,
+4. Series episode resolution, provider refresh/login UI, automatic provider guide population, catch-up, DVR,
    multiview, DRM integration and cloud sync are not implemented.
 5. MKV/AVI and unsupported codecs need a different playback/remux/transcode strategy;
    imported-library count is not a compatibility metric. Native artwork uses placeholders.
@@ -155,6 +158,8 @@ catalogs, device exports, user-specific verification details or credential-beari
 The maintainer authorizes publishing, GitHub releases/tags, deployment and store submission.
 `npm run release` builds `dist/airwave-web-0.2.0.tar.gz` from the explicit runtime allowlist
 plus MIT/third-party notices. It runs the same check first and excludes server code and catalogs.
+Apple bundles the entire `app/` directory; the check enforces that this directory contains
+exactly the allowlisted files, including vendor assets.
 `npm run package` stages that allowlist for Tizen and requires a certificate profile/CLI.
 Apple builds use the two Xcode schemes; signing identifiers, assets and store declarations
 must be prepared and approved for a particular release. No automated publishing exists.

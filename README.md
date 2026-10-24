@@ -13,7 +13,7 @@ Samsung target is Tizen 6.0+. Physical iOS and Samsung TV playback remain unveri
 | Layer | Responsibility |
 |---|---|
 | `app/core.js` | Shared playlist parsing, filters, programme times |
-| `app/app.js`, `styles.css` | Shared library, search, favorites, guide, details; phone bottom navigation, desktop/TV side navigation |
+| `app/app.js`, `app/styles.css` | Shared library, search, favorites, guide, details; phone bottom navigation, desktop/TV side navigation |
 | `app/player.js` | Generation-scoped playback lifecycle; browser video/HLS.js, Samsung AVPlay, Apple bridge |
 | `app/platform.js` | Private library and text import adapters |
 | `server/` + `scripts/serve.cjs` | Local web relay: provider URLs stay server-side, same-origin opaque media URLs, HLS rewriting and Range support |
@@ -32,7 +32,7 @@ npm run check
 npm run release
 ```
 
-The check runs 19 active tests plus one pending Samsung version-parity expectation. The release command creates a static runtime archive in `dist/`, with no private catalog or Node relay.
+The check runs 20 active tests plus one pending Samsung version-parity expectation. The release command creates a static runtime archive in `dist/`, with no private catalog or Node relay.
 
 ## Run the web app
 
