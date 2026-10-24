@@ -2,6 +2,8 @@
 
 Airwave is an independent, MIT-licensed media player for user-supplied playlists. One bundled web interface serves web, Samsung TV, iOS and macOS; playback and private storage have platform adapters. This is a development build, not a store release. No provider credentials or private catalogs ship with it.
 
+Describe Airwave in its own terms. Keep competitor names, comparisons and inspiration attributions out of repository files and commit messages; preserve required third-party dependency and media license notices.
+
 Read `docs/PROJECT.md` before changing platform boundaries, storage, packaging, or product scope; it holds the complete repo map, history and known limitations.
 
 ## How it works
