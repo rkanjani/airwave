@@ -52,9 +52,13 @@ No fixture is a captured private provider response.
 Browser -> scripts/serve.cjs -> app/index.html -> platform/core/player/app
         -> /api/library -> server/library.cjs -> opaque library snapshot
         -> /api/media/<id> -> server/network.cjs -> user-selected provider
+        -> cast.js -> Google Cast sender (gstatic) -> Cast device
+           -> direct source URL, or POST /api/cast -> server/cast.cjs token
+Cast device -> LAN listener (AIRWAVE_CAST=1) /cast/<token>/api/media/<id> -> provider
 
 Apple -> Airwave.swift -> bundled app/index.html -> webkit airwave messages
       -> native encrypted catalog + Keychain -> AVPlayer -> user-selected provider
+iOS   -> Google Cast iOS SDK -> Cast device -> user-selected provider
 
 Samsung -> app/config.xml -> app/index.html -> player.js -> Samsung AVPlay
 ```
@@ -65,6 +69,9 @@ The shared player shows a remote-scrubbable seek bar for movies and programme pr
 The UI is shared; Apple video controls are native and Samsung remote keys are registered
 when the corresponding APIs exist. Browser playback uses native video or HLS.js.
 Callbacks are guarded by playback generation so abandoned streams cannot restart.
+In Chrome, `app/cast.js` adds a Cast button once a device is found; while casting, the same
+controls drive the receiver and disconnecting resumes locally. iOS uses the Cast SDK's own
+button and expanded controls from the native player. macOS and Samsung do not cast.
 
 `AirwavePlatform` loads private catalogs through the Apple bridge or local web endpoint.
 Static hosting with no `/api/library` endpoint falls back to ordinary demo/M3U use.
@@ -72,7 +79,9 @@ It remains subject to browser CORS and mixed-content rules; the tested private-s
 Chromium path used the local relay.
 
 External runtime destinations are user-configured stream/logo/guide hosts and the
-public W3C-hosted Blender demo trailers. Dependency restoration contacts npm.
+public W3C-hosted Blender demo trailers. Opening the player in Chrome loads Google's Cast
+sender script from www.gstatic.com; the iOS build resolves the Google Cast SDK package from
+GitHub. Dependency restoration contacts npm.
 CI runs on GitHub Actions. There is no analytics, cloud-sync or Airwave account service.
 
 ## Data contracts and ownership
@@ -94,6 +103,13 @@ CI runs on GitHub Actions. There is no analytics, cloud-sync or Airwave account 
   and kept only for the session. Favorites/history are separate local-storage keys.
 - Bridge request IDs correlate responses; playback tokens reject stale events. Default
   native timeout is 30 seconds, document picking 5 minutes (`tests/platform.test.cjs`).
+- Casting a relay item mints one cast token through the cookie-guarded `POST /api/cast`
+  (`/api/cast/end` revokes it). The token is 48 hex characters, rotates on every cast and expires
+  after 12 hours; the LAN listener checks its own Host, serves only `/cast/<token>/api/media/<id>`
+  for registered resources, rewrites playlists under the same prefix and adds CORS for receivers
+  (`tests/cast.test.cjs`). The page receives only the LAN URL and content type, never upstream URLs.
+- iOS casting passes the native item's provider URL to the receiver from Swift; it is not
+  exposed to JavaScript. The bridge `play` payload now also carries the item `kind`.
 - There is no cross-device sync or provider refresh UI. IDs must remain stable to retain
   favorites and movie progress; changing storage shape needs an explicit migration.
 
@@ -120,6 +136,10 @@ in `VERIFICATION.md`; their private test data and screenshots are deliberately a
   cross-platform scope (initial implementation: `ffeb7ff`, `app/platform.js`, Apple shell).
 - Private catalog credentials stay on the local server or in Apple native storage for
   those paths; ordinary M3U Remember is an explicit, documented exception.
+- Casting private-library items from the web app uses an opt-in LAN listener (`AIRWAVE_CAST=1`)
+  because receivers can't reach loopback, send the session cookie or rely on provider CORS.
+  It widens the relay boundary to the local network for one tokenized cast at a time; the
+  loopback app, Host/origin/session checks and private-network upstream rejection are unchanged.
 - The relay is loopback-only and single-user. Turning it into a public multi-user service
   is a new authentication/storage/security project, not a host-binding tweak.
 - Native Apple controls use AVPlayerView/AVPlayerViewController. Initial development
@@ -157,6 +177,12 @@ catalogs, device exports, user-specific verification details or credential-beari
 7. ATS permits HTTP media. Distribution needs a documented exception or narrower policy.
 8. First-party JS is compact and has no formatter/linter/typechecker. Current checks cover
    syntax, wiring, hygiene and behavior tests, not exhaustive static analysis or accessibility.
+9. Casting is verified only against a synthetic Cast framework, the relay's token tests and the
+   iOS simulator's Cast prompt. Real receiver playback, HTTP sources on the HTTPS receiver page,
+   provider CORS and the iOS local-network prompt on hardware are unverified. A custom receiver
+   or an iOS-side relay would be needed for HLS providers without CORS when casting from iOS.
+10. The iOS target links the Google Cast SDK (exact 4.8.6). Its Bluetooth/local-network usage and
+   App Store privacy declarations need review before distribution.
 
 ## Release ownership
 

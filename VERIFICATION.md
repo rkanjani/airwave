@@ -11,6 +11,13 @@
 - Automated parser, guide, filtering, relay and mocked AVPlay lifecycle checks pass. Run `npm run check` to reproduce the current automated evidence.
 - Local relay rejected unauthenticated and cross-origin library requests, and returned opaque media URLs to its authenticated local session.
 
+## Casting (October 2026)
+
+- Cast relay: token minting, rotation, revocation, 12-hour expiry, Host/method/path checks, CORS and playlist prefixing pass in `tests/cast.test.cjs`. A synthetic-library relay run returned 405 for GET `/api/cast`, 403 without the session cookie or cross-origin, a LAN URL with CORS for the active token, and 404 after `/api/cast/end`.
+- Chrome sender: Google's Cast framework loaded from gstatic in the app's Chromium pane, which found no devices and kept the Cast button hidden. With a synthetic Cast framework, the player cast a demo title at its current position, drove seek and pause on the receiver, showed "Playing on …" at desktop and 375 px widths, and resumed locally at the receiver position after Disconnect.
+- iOS: both Apple targets compile with the Google Cast SDK 4.8.6 package on iOS. On the iPhone 17 Pro simulator the app launched, the Cast button appeared beside Back in the native player, and tapping it opened the SDK's local-network prompt.
+- Not verified: playback on a real Cast device, HTTP and private-library sources on a real receiver, provider CORS, and casting from a physical iPhone.
+
 ## Remaining verification
 
 Physical Samsung installation and remote controls; Samsung firmware and codecs; signing and WGT packaging; physical iOS playback; public hosting; App Store distribution; series resolution; full codec coverage; provider refresh. Native and browser players do not support all MKV/AVI content. Hardware playback is not proven by mocked AVPlay tests or successful Apple builds.
