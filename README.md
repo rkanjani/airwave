@@ -81,6 +81,8 @@ Both targets link MPVKit 1.0.0 (mpv and FFmpeg, LGPL build) through Swift Packag
 
 To time playback start-up, launch with `-AirwavePlaybackTiming YES` and watch `log stream --predicate 'subsystem == "app.airwave"'` (on the simulator, prefix `xcrun simctl spawn booted`). Each line gives the engine, live or movie, container, attempt and seconds from the play request to the first frame. It never logs URLs.
 
+To try ML super-resolution on SD channels (macOS or iOS 26, not the simulator), launch with `-AirwaveSuperResolution YES`. It applies only to AVPlayer titles up to 960×960; see `VERIFICATION.md` for what it costs and what it looks like.
+
 Select a development team and your own bundle identifiers for device distribution. Local builds:
 
 ```sh

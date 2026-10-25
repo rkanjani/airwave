@@ -7,6 +7,7 @@ import Security
 import UniformTypeIdentifiers
 import ImageIO
 import os
+import VideoToolbox
 import Libmpv
 #if os(iOS)
 import GoogleCast
@@ -478,6 +479,7 @@ enum PlaybackTiming {
         if let detail { line += " detail=\(detail)" }
         log.notice("\(line, privacy: .public)")
     }
+    static func note(_ line: String) { if enabled { log.notice("\(line, privacy: .public)") } }
 }
 
 @MainActor final class AVPlayerEngine: PlaybackEngine {
@@ -490,6 +492,9 @@ enum PlaybackTiming {
     private var probe: Any?
     private var baseline: Double?
     private var started = false
+    private let upscaler = SuperResolution.make()
+    // Drawn over the player's own picture while super-resolution is active.
+    var overlay: CALayer? { upscaler?.layer }
     private var resolving: Task<Void, Never>?
     var time: Double { finite(player.currentTime().seconds) }
     var duration: Double { finite(player.currentItem?.duration.seconds ?? 0) }
@@ -505,6 +510,7 @@ enum PlaybackTiming {
     private func attach(_ url: URL, resume: Double) {
         let item = AVPlayerItem(url: url)
         player.replaceCurrentItem(with: item)
+        upscaler?.attach(item)
         observers = [
             item.observe(\.status, options: [.new]) { [weak self] item, _ in
                 let status = item.status, code = (item.error as NSError?)?.code ?? 0
@@ -516,7 +522,7 @@ enum PlaybackTiming {
             },
             player.observe(\.isExternalPlaybackActive, options: [.new]) { [weak self] p, _ in
                 let active = p.isExternalPlaybackActive
-                Task { @MainActor in self?.onEvent(.externalPlayback(active)) }
+                Task { @MainActor in self?.upscaler?.suspend(active); self?.onEvent(.externalPlayback(active)) }
             },
         ]
         notices = [
@@ -555,10 +561,11 @@ enum PlaybackTiming {
     }
     func play() { player.play() }
     func pause() { player.pause() }
-    func seek(to seconds: Double) { player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600)) }
+    func seek(to seconds: Double) { upscaler?.flush(); player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600)) }
     func close() {
         resolving?.cancel(); resolving = nil
         onEvent = { _ in }
+        upscaler?.close()
         observers.forEach { $0.invalidate() }; observers = []
         notices.forEach { NotificationCenter.default.removeObserver($0) }; notices = []
         for observer in [probe, ticker].compactMap({ $0 }) { player.removeTimeObserver(observer) }
@@ -566,6 +573,125 @@ enum PlaybackTiming {
         player.pause(); player.replaceCurrentItem(with: nil)
     }
 }
+
+// Opt-in ML super-resolution for AVPlayer titles: launch with `-AirwaveSuperResolution YES` (or `defaults write`).
+// VideoToolbox's low-latency scaler (macOS/iOS 26 on a device, not the simulator) doubles 8-bit SDR sources up to
+// 960×960, which covers SD channels; larger, HDR and AirPlay titles keep AVPlayer's own picture. See VERIFICATION.md.
+@MainActor protocol Upscaler: AnyObject {
+    var layer: CALayer { get }
+    func attach(_ item: AVPlayerItem)
+    func suspend(_ suspended: Bool)
+    func flush()
+    func close()
+}
+enum SuperResolution {
+    static let requested = UserDefaults.standard.bool(forKey: "AirwaveSuperResolution")
+    @MainActor static func make() -> (any Upscaler)? {
+        #if !targetEnvironment(simulator)
+        if requested, #available(macOS 26.0, iOS 26.0, *), VTLowLatencySuperResolutionScalerConfiguration.isSupported { return VideoToolboxUpscaler() }
+        #endif
+        return nil
+    }
+}
+
+#if !targetEnvironment(simulator)
+// Pulls each decoded frame a little ahead of the player's clock, scales it, and queues it on a display layer that
+// follows the item's timebase, so the picture stays in sync with the sound and the system does the final fit.
+@available(macOS 26.0, iOS 26.0, *)
+@MainActor final class VideoToolboxUpscaler: NSObject, Upscaler {
+    private let display = AVSampleBufferDisplayLayer()
+    var layer: CALayer { display }
+    // The scaler took about 2 ms per 480p frame on an M3 Pro; 50 ms of lead leaves room for slower devices.
+    private static let lead = 0.05
+    private let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+                                                                         kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any]()])
+    private weak var item: AVPlayerItem?
+    private var link: CADisplayLink?
+    private var processor: VTFrameProcessor?
+    private var pool: CVPixelBufferPool?
+    private var size = (0, 0)
+    private var busy = false, active = false, suspended = false
+
+    override init() {
+        super.init()
+        display.videoGravity = .resizeAspect; display.isHidden = true
+        #if os(macOS)
+        link = NSScreen.main?.displayLink(target: self, selector: #selector(tick))
+        #else
+        link = CADisplayLink(target: self, selector: #selector(tick))
+        #endif
+        link?.add(to: .main, forMode: .common)
+    }
+    func attach(_ item: AVPlayerItem) { self.item = item; item.add(output) }
+    func suspend(_ suspended: Bool) { self.suspended = suspended; if suspended { deactivate() } }
+    func flush() { display.sampleBufferRenderer.flush() }
+    func close() {
+        link?.invalidate(); link = nil
+        processor?.endSession(); processor = nil
+        item?.remove(output); deactivate()
+    }
+    @objc private func tick() {
+        guard !busy, !suspended else { return }
+        let target = output.itemTime(forHostTime: CACurrentMediaTime() + Self.lead)
+        var time = CMTime.invalid
+        guard output.hasNewPixelBuffer(forItemTime: target), let source = output.copyPixelBuffer(forItemTime: target, itemTimeForDisplay: &time) else { return }
+        let w = CVPixelBufferGetWidth(source), h = CVPixelBufferGetHeight(source)
+        if (w, h) != size { size = (w, h); return reconfigure(source) }
+        guard let processor, let pool else { return }
+        var scaled: CVPixelBuffer?
+        CVPixelBufferPoolCreatePixelBuffer(nil, pool, &scaled)
+        guard let scaled, let from = VTFrameProcessorFrame(buffer: source, presentationTimeStamp: time),
+              let to = VTFrameProcessorFrame(buffer: scaled, presentationTimeStamp: time) else { return }
+        CVBufferPropagateAttachments(source, scaled)
+        busy = true
+        processor.process(parameters: VTLowLatencySuperResolutionScalerParameters(sourceFrame: from, destinationFrame: to)) { _, error in
+            Task { @MainActor in self.show(error == nil ? scaled : nil, at: time) }
+        }
+    }
+    // A new frame size (an adaptive-bitrate switch, say) restarts the scaler, or hands back to the player when it doesn't fit.
+    private func reconfigure(_ source: CVPixelBuffer) {
+        deactivate(); processor?.endSession(); processor = nil
+        let transfer = CVBufferCopyAttachment(source, kCVImageBufferTransferFunctionKey, nil) as? String
+        let hdr = [kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ, kCVImageBufferTransferFunction_ITU_R_2100_HLG].contains { $0 as String == transfer }
+        guard !hdr, VTLowLatencySuperResolutionScalerConfiguration.supportedScaleFactors(frameWidth: size.0, frameHeight: size.1).contains(2) else { return }
+        let configuration = VTLowLatencySuperResolutionScalerConfiguration(frameWidth: size.0, frameHeight: size.1, scaleFactor: 2)
+        busy = true
+        // Loading the model can take longer than a frame, so the session starts off the main thread.
+        Task.detached {
+            let processor = VTFrameProcessor()
+            let started = (try? processor.startSession(configuration: configuration)) != nil
+            await self.ready(started ? processor : nil, configuration)
+        }
+    }
+    private func ready(_ started: VTFrameProcessor?, _ configuration: VTLowLatencySuperResolutionScalerConfiguration) {
+        busy = false
+        guard let started, link != nil, (configuration.frameWidth, configuration.frameHeight) == size else { started?.endSession(); return }
+        var pool: CVPixelBufferPool?
+        CVPixelBufferPoolCreate(nil, nil, configuration.destinationPixelBufferAttributes as CFDictionary, &pool)
+        processor = started; self.pool = pool
+    }
+    private func show(_ frame: CVPixelBuffer?, at time: CMTime) {
+        busy = false
+        guard link != nil, !suspended else { return }
+        // A scaler error ends super-resolution for this frame size; the player's own picture returns.
+        guard let frame else { processor?.endSession(); processor = nil; return deactivate() }
+        if display.controlTimebase == nil { display.controlTimebase = item?.timebase }
+        var format: CMVideoFormatDescription?, sample: CMSampleBuffer?
+        CMVideoFormatDescriptionCreateForImageBuffer(allocator: nil, imageBuffer: frame, formatDescriptionOut: &format)
+        var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: time, decodeTimeStamp: .invalid)
+        guard let format, CMSampleBufferCreateReadyWithImageBuffer(allocator: nil, imageBuffer: frame, formatDescription: format, sampleTiming: &timing, sampleBufferOut: &sample) == noErr, let sample else { return }
+        display.sampleBufferRenderer.enqueue(sample)
+        guard !active else { return }
+        active = true; display.isHidden = false; output.suppressesPlayerRendering = true
+        PlaybackTiming.note("super-resolution on \(size.0)x\(size.1) -> \(CVPixelBufferGetWidth(frame))x\(CVPixelBufferGetHeight(frame))")
+    }
+    private func deactivate() {
+        guard active else { return }
+        active = false; display.isHidden = true; output.suppressesPlayerRendering = false
+        display.sampleBufferRenderer.flush()
+    }
+}
+#endif
 
 // Providers often answer a channel URL with a 302 to a session host, and AVPlayer requests an HLS playlist
 // twice while starting, paying that redirect and a new connection each time; later refreshes already use the
@@ -774,7 +900,7 @@ struct AirwaveWebView: UIViewRepresentable {
 struct AirwaveVideoView: View {
     let engine: any PlaybackEngine
     var body: some View {
-        if let av = engine as? AVPlayerEngine { AVPlayerSurface(player: av.player) }
+        if let av = engine as? AVPlayerEngine { AVPlayerSurface(player: av.player, overlay: av.overlay) }
         else if let mpv = engine as? MPVEngine { MetalSurface(layer: mpv.layer) }
     }
 }
@@ -782,8 +908,13 @@ struct AirwaveVideoView: View {
 #if os(macOS)
 struct AVPlayerSurface: NSViewRepresentable {
     let player: AVPlayer
+    let overlay: CALayer?
     // AirwavePlayerControls replaces the system bar, which has no option to drop its overflow button.
-    func makeNSView(context: Context) -> AVPlayerView { let view = AVPlayerView(); view.player = player; view.controlsStyle = .none; return view }
+    func makeNSView(context: Context) -> AVPlayerView {
+        let view = AVPlayerView(); view.player = player; view.controlsStyle = .none
+        if let overlay, let content = view.contentOverlayView { content.addSubview(LayerHostView(overlay, in: content.bounds)) }
+        return view
+    }
     func updateNSView(_ view: AVPlayerView, context: Context) { if view.player !== player { view.player = player } }
 }
 final class MetalHostView: NSView {
@@ -797,6 +928,14 @@ final class MetalHostView: NSView {
         metal.drawableSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
     }
     override func viewDidChangeBackingProperties() { super.viewDidChangeBackingProperties(); needsLayout = true }
+}
+// Keeps a layer filling its view; super-resolution draws in the player's content overlay this way.
+final class LayerHostView: NSView {
+    private let hosted: CALayer
+    init(_ layer: CALayer, in frame: CGRect) { hosted = layer; super.init(frame: frame); wantsLayer = true; autoresizingMask = [.width, .height]; self.layer?.addSublayer(layer) }
+    required init?(coder: NSCoder) { nil }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func layout() { super.layout(); CATransaction.begin(); CATransaction.setDisableActions(true); hosted.frame = bounds; CATransaction.commit() }
 }
 struct MetalSurface: NSViewRepresentable {
     let layer: CAMetalLayer
@@ -816,7 +955,12 @@ struct AirPlayButton: NSViewRepresentable {
 #else
 struct AVPlayerSurface: UIViewControllerRepresentable {
     let player: AVPlayer
-    func makeUIViewController(context: Context) -> AVPlayerViewController { let view = AVPlayerViewController(); view.player = player; return view }
+    let overlay: CALayer?
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let view = AVPlayerViewController(); view.player = player
+        if let overlay, let content = view.contentOverlayView { content.addSubview(LayerHostView(overlay, in: content.bounds)) }
+        return view
+    }
     func updateUIViewController(_ view: AVPlayerViewController, context: Context) { if view.player !== player { view.player = player } }
 }
 final class MetalHostView: UIView {
@@ -831,6 +975,12 @@ final class MetalHostView: UIView {
         metal.drawableSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
         CATransaction.commit()
     }
+}
+final class LayerHostView: UIView {
+    private let hosted: CALayer
+    init(_ layer: CALayer, in frame: CGRect) { hosted = layer; super.init(frame: frame); isUserInteractionEnabled = false; autoresizingMask = [.flexibleWidth, .flexibleHeight]; self.layer.addSublayer(layer) }
+    required init?(coder: NSCoder) { nil }
+    override func layoutSubviews() { super.layoutSubviews(); CATransaction.begin(); CATransaction.setDisableActions(true); hosted.frame = bounds; CATransaction.commit() }
 }
 struct MetalSurface: UIViewRepresentable {
     let layer: CAMetalLayer
