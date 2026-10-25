@@ -491,6 +491,10 @@ private final class MPVRelay: @unchecked Sendable { weak var engine: MPVEngine? 
         ("vo", "gpu-next"), ("gpu-api", "vulkan"), ("gpu-context", "moltenvk"), ("hwdec", "videotoolbox"),
         ("config", "no"), ("ytdl", "no"), ("terminal", "no"), ("input-default-bindings", "no"), ("input-media-keys", "no"),
         ("idle", "yes"), ("keep-open", "no"), ("network-timeout", "20"), ("demuxer-lavf-analyzeduration", "0.5"),
+        // mpv's built-in scripts are Lua, and LuaJIT writes executable memory, which the hardened runtime
+        // kills (OS_REASON_CODESIGNING) in any signed build. Airwave draws its own controls, so none are needed.
+        ("load-scripts", "no"), ("osc", "no"), ("load-stats-overlay", "no"), ("load-console", "no"), ("load-osd-console", "no"),
+        ("load-auto-profiles", "no"), ("load-select", "no"), ("load-positioning", "no"), ("load-commands", "no"), ("load-context-menu", "no"),
     ]
     init() {
         // MoltenVK otherwise prints its device report to the console for every new player.
