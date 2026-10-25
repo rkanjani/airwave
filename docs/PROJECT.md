@@ -121,6 +121,9 @@ CI runs on GitHub Actions. There is no analytics, cloud-sync or Airwave account 
   (`tests/cast.test.cjs`). The page receives only the LAN URL and content type, never upstream URLs.
 - iOS casting passes the native item's provider URL to the receiver from Swift; it is not
   exposed to JavaScript. The bridge `play` payload now also carries the item `kind`.
+- The player's top-right heart toggles the playing title's favorite. The bridge `play` payload
+  carries its current `favorite` state; the native overlay reports taps as a `favorite` playback
+  event, and JavaScript storage stays the only favorites store.
 - There is no cross-device sync or provider refresh UI. IDs must remain stable to retain
   favorites and movie progress; changing storage shape needs an explicit migration.
 
