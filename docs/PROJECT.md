@@ -36,7 +36,7 @@ Successful import is not proof that every stream/container/codec will play.
 | `docs/` | Docs | This product, architecture, history and debt map |
 | `package.json` | Config | Commands, Node engine, license and exact dependencies; private prevents accidental npm publication |
 | `package-lock.json` | Generated/committed | Reproducible dependency resolution; update through npm |
-| `platforms/` | First-party/config | Swift Apple shell, plist and hand-authored Xcode project/shared schemes |
+| `platforms/` | First-party/config | Swift Apple shell, plist, app icon asset catalog and hand-authored Xcode project/shared schemes |
 | `scripts/` | First-party tooling | Local server, unified checks, runtime allowlist, web release and Tizen packager |
 | `server/` | First-party | Private library registry, HLS rewriting, safe upstream requests and the tile-artwork cache |
 | `tests/` | Synthetic tests | Node tests for parsing, filtering, playback, native bridge, relay and release staging |
