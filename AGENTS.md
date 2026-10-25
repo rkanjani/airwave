@@ -11,15 +11,15 @@ Read `docs/PROJECT.md` before changing platform boundaries, storage, packaging, 
 1. `scripts/serve.cjs` serves `app/` on loopback; an optional `AIRWAVE_LIBRARY_PATH` loads a private catalog through `server/library.cjs`. `AIRWAVE_CAST=1` adds a token-protected LAN listener (`server/cast.cjs`) for Cast receivers.
 2. `app/index.html` loads HLS.js, then `platform.js`, `core.js`, `player.js`, and `app.js`. `AirwavePlatform.loadLibrary()` selects the native bridge, local relay or demo fallback.
 3. `app/app.js` owns navigation, imports, favorites and progress. `app/player.js` selects Apple native playback, Samsung AVPlay or browser video/HLS.js. In Chrome, `app/cast.js` hands the title to a Cast device and the same controls drive it.
-4. `platforms/apple/Airwave.swift` bundles that same interface, owns the native catalog, and presents AVPlayerView/AVPlayerViewController.
+4. `platforms/apple/Airwave.swift` bundles that same interface, owns the native catalog, and plays each title on one of two engines behind its `PlaybackEngine` protocol: AVPlayer (HLS, MP4/MOV/M4V, and anything while AirPlay is in use) or mpv from MPVKit (raw `.ts` live channels, MKV/AVI and other containers). A failed start, or a first mpv attempt with no frame by its deadline, retries once on the other engine.
 
 ## Where changes belong
 
 - `app/app.js`, `app/styles.css`: shared screens, copy, touch/remote/keyboard navigation.
-- `app/core.js`: M3U/XMLTV parsing, display-name cleanup, time calculations and filtering; tests in `tests/core.test.cjs`.
+- `app/core.js`: M3U/XMLTV parsing, display-name tidying, time calculations and filtering; tests in `tests/core.test.cjs`.
 - `app/platform.js`, `app/player.js`, `app/cast.js`: JavaScript adapter contracts; tests in `tests/platform.test.cjs`, `tests/player.test.cjs` and `tests/sender.test.cjs`.
 - `server/library.cjs`, `server/network.cjs`, `server/artwork.cjs`: opaque media registry, HLS rewriting, outbound request boundaries and the tile-artwork cache; tests in `tests/library.test.cjs`. `server/cast.cjs`: cast tokens and the LAN listener; tests in `tests/cast.test.cjs`.
-- `platforms/apple/`: two shared Xcode schemes, Swift shell and plist. iOS-only casting stays in `#if os(iOS)` blocks; the Google Cast SDK is an exact-pinned Swift package on the iOS target only.
+- `platforms/apple/`: two shared Xcode schemes, Swift shell and plist. iOS-only casting stays in `#if os(iOS)` blocks; the Google Cast SDK is an exact-pinned Swift package on the iOS target only. MPVKit (exact 1.0.0, its LGPL `MPVKit` product, never `MPVKit-GPL`) is linked into both targets. Engine choice lives in `PlaybackPolicy`, fallback and timing in `AirwaveModel.begin`/`handle`, and the controls read `PlaybackState`, never an engine directly.
 - `scripts/runtime-files.cjs`: explicit web/Tizen release allowlist; update this when adding a runtime asset. Apple bundles the whole `app/` directory, whose contents the check verifies against that same list. The vendor bundle and license remain unmodified.
 
 ## Contracts to preserve
@@ -27,9 +27,9 @@ Read `docs/PROJECT.md` before changing platform boundaries, storage, packaging, 
 - Shared UI changes apply to every surface. Differences in playback, native controls and storage are documented platform behavior, not full codec parity.
 - Playback callbacks belong to their generation. Closing or switching invalidates old success, failure and time callbacks; cleanup releases the stream.
 - Private catalog JSON is version 2 with `name` and `items`. Each item has a stable `id`, `name`, HTTP(S) `url`, `kind` (`live` or `movie`), and optional grouping, logo, EPG and favorite fields. Keep the raw file outside Git and app bundles.
-- Web snapshots replace upstream URLs with `/api/media/` IDs; native snapshots use `airwave-native://` media IDs and `airwave-art://logo/<id>` artwork IDs. Provider credentials and image URLs stay outside JavaScript for these two paths. Display names are cleaned for tiles only; search, IDs and storage keep the original names. Normal M3U Remember remains explicit opt-in, unencrypted local storage.
-- `airwave.library` local-storage format is version 1. Favorites, history and favorite-seed keys are separate. Preserve existing IDs and storage readability when evolving imports.
-- Apple bridge messages are `{id, action, payload}`; replies resolve by ID and playback events by token. The native catalog is AES-GCM encrypted with a Keychain-held key.
+- Web snapshots replace upstream URLs with `/api/media/` IDs; native snapshots use `airwave-native://` media IDs and `airwave-art://logo/<id>` artwork IDs. Provider credentials and image URLs stay outside JavaScript for these two paths. Normal M3U Remember remains explicit opt-in, unencrypted local storage.
+- `airwave.library` local-storage format is version 1. Favorites, history, favorite-seed and the Tidy names preference keys are separate; tidied names are display-only, so stored items and search keep playlist names. Preserve existing IDs and storage readability when evolving imports.
+- Apple bridge messages are `{id, action, payload}`; replies resolve by ID and playback events by token, whichever engine plays. The native catalog is AES-GCM encrypted with a Keychain-held key. Engines receive provider URLs only from native code; the opt-in timing log (`-AirwavePlaybackTiming YES`) records engine, kind, container and seconds, never URLs.
 - The web relay is a local single-user process: loopback binding, Host/origin/session checks, registered upstream URLs and private-network rejection are part of its boundary. Public hosting requires a separate security design. The opt-in cast listener is the only LAN-facing path: one rotating, expiring token, its own Host check, registered media only, never upstream URLs.
 - Private provider data stays out of tests and CI. Use reserved `.example` hosts and synthetic credentials; validate real playback manually only when authorized.
 
@@ -69,7 +69,9 @@ The initial work centered on shared browsing and platform playback; there is not
 ## Gotchas
 
 - The Samsung manifest is still 0.1.0 while npm and Apple are 0.2.0. The version-parity expectation is a deliberate pending test, not a passing assertion. Resolve it in release work.
-- Tiles show catalog logos/posters and XMLTV programme icons when present, otherwise the name on a flat tint. No poster lookup exists for titles without catalog artwork. Series/episodes, automatic provider refresh, broad MKV/AVI compatibility and cloud sync are not implemented.
+- Tiles show catalog logos/posters and XMLTV programme icons when present, otherwise the name on a flat tint; there is no poster lookup for titles without catalog artwork. Series/episodes, automatic provider refresh and cloud sync are not implemented. MKV/AVI play on Apple through mpv; the browser and Samsung still cannot play them.
+- mpv was measured slower than AVPlayer on multi-rendition HLS (11–23 s on Apple's bipbop), so keep HLS on AVPlayer. AVPlayer cannot open an unbounded raw MPEG-TS stream (it fails at once), which is why live `.ts` channels start on mpv. With AVPlayer, `automaticallyWaitsToMinimizeStalling = false` broke start-up in earlier testing, and `timeControlStatus == .playing` can arrive before a frame: first frame means the playhead moved.
+- MPVKit ships static libraries. LGPL compliance for a distributed Apple build relies on this source being public and relinkable; see `NOTICE.md` before any store submission.
 - Reset clears browser preferences and the Apple artwork cache, not the relay's external catalog or the Apple encrypted file. Check the actual storage path before promising deletion.
 - Apple uses an ATS HTTP-media exception. No certificate validation bypass is present. Review the exception for distribution.
 - Mocked AVPlay tests and successful compilation do not prove device playback. See `VERIFICATION.md`.

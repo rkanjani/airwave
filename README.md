@@ -18,7 +18,7 @@ Samsung target is Tizen 6.0+. Physical iOS and Samsung TV playback remain unveri
 | `app/cast.js` | Chrome Cast sender for the default media receiver; drives the shared player controls while casting |
 | `app/platform.js` | Private library and text import adapters |
 | `server/` + `scripts/serve.cjs` | Local web relay: provider URLs stay server-side, same-origin opaque media URLs, HLS rewriting and Range support; opt-in token-protected LAN cast listener |
-| `platforms/apple/Airwave.swift` | iOS/macOS SwiftUI shell, bundled WKWebView, native AVPlayer controls, document picker, AES-GCM catalog storage with Keychain key |
+| `platforms/apple/Airwave.swift` | iOS/macOS SwiftUI shell, bundled WKWebView, AVPlayer and mpv playback engines with automatic selection and fallback, compact native controls, document picker, AES-GCM catalog storage with Keychain key |
 | `app/config.xml` | Samsung TV packaging and privileges |
 
 Apple apps bundle the interface and connect directly to the provider; they do not depend on the local web server. Native catalog credentials never enter the web view. Tile artwork comes from the catalog's logos and posters (resolved natively on Apple, through the relay on the web) and from XMLTV programme icons; titles without artwork show their name on a flat tint. The web relay keeps provider credentials out of the browser library payload. Web and Apple catalogs are private, device-local copies; there is no cloud synchronization.
@@ -77,6 +77,10 @@ Open `platforms/apple/Airwave.xcodeproj`. Shared schemes:
 - `Airwave-macOS`: macOS 13+, universal Intel/Apple Silicon.
 - `Airwave-iOS`: iPhone/iPad, iOS 16+.
 
+Both targets link MPVKit 1.0.0 (mpv and FFmpeg, LGPL build) through Swift Package Manager; the first build downloads its frameworks. See `NOTICE.md` for what that means for distributing a build.
+
+To time playback start-up, launch with `-AirwavePlaybackTiming YES` and watch `log stream --predicate 'subsystem == "app.airwave"'` (on the simulator, prefix `xcrun simctl spawn booted`). Each line gives the engine, live or movie, container, attempt and seconds from the play request to the first frame. It never logs URLs.
+
 Select a development team and your own bundle identifiers for device distribution. Local builds:
 
 ```sh
@@ -106,8 +110,9 @@ This produces a signed widget in `dist/`. Source ZIPs are not installable widget
 
 - Library browsing, title/group search, favorites, movie progress with a resume choice, details, M3U and XMLTV import, remote/keyboard navigation.
 - Browser and Samsung playback share one control layer: movies get a seek bar the remote scrubs (left/right to choose, OK to jump, Back to cancel), skip 10 seconds and Start over; live channels show the current programme, what is next and a Guide shortcut.
-- Phone layout uses touch-sized controls and safe-area spacing. macOS native playback uses a compact Airwave control bar; iOS uses system video controls.
-- Browser HLS.js is pinned to 1.7.3; Safari/native HLS and Samsung AVPlay are separate adapters. MKV/AVI and some codecs in the imported collection will not play on Apple/browser engines without remuxing/transcoding. That service is not implemented.
+- Phone layout uses touch-sized controls and safe-area spacing. macOS native playback uses a compact Airwave control bar; iOS uses system video controls for AVPlayer and the compact bar for mpv.
+- The Apple apps choose a player per title: AVPlayer for HLS and MP4/MOV/M4V (and whenever AirPlay is in use), mpv for live channels given as raw `.ts`, MKV, AVI and other containers. If one can't start a title, the other gets one try, and the one that worked is used for that title until the app quits. AirPlay is offered only while AVPlayer plays.
+- Browser HLS.js is pinned to 1.7.3; Safari/native HLS and Samsung AVPlay are separate adapters. MKV/AVI and some codecs will not play in the browser or on Samsung without remuxing/transcoding. That service is not implemented.
 - Series listings require episode resolution rather than direct playable stream URLs. Series/episode browsing is not implemented.
 - No guide schedules were extracted. Import matching XMLTV to populate the guide. No Xtream login/automatic catalog refresh UI, catch-up, DVR, multiview, DRM or cloud sync.
 - Imported large catalogs render in pages of 48. M3U text import retains its 5 MB/10,000-entry limit; the private JSON path supports the larger migrated library.

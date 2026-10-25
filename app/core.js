@@ -35,21 +35,56 @@
   function currentProgram(programs,id,now){return (programs[id]||[]).find(function(p){return p.start<=now&&p.end>now;})||null;}
   function progress(program,now){return program?Math.max(0,Math.min(100,(now-program.start)/(program.end-program.start)*100)):0;}
   function filter(items,query,group,kind){query=(query||'').trim().toLocaleLowerCase();return items.filter(function(x){return (!kind||x.kind===kind)&&(!group||group==='All'||x.group===group)&&(!query||(x.name+' '+x.group).toLocaleLowerCase().indexOf(query)>=0);});}
-  // Provider playlists decorate names with separator hashes, superscript tags and shared prefixes ("NF - ", "SLING: ").
-  var SUP='ᴬᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴼᴾᴿᵀᵁⱽᵂᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻ⁰¹²³⁴⁵⁶⁷⁸⁹',PLAIN='ABDEGHIJKLMNOPRTUVWabcdefghijklmnoprstuvwxyz0123456789';
-  var QUALITY=/^(?:SD|HD|FHD|UHD|[48]K|HDR|HEVC|H\.?26[45]|RAW|\d{2,3}\s?FPS)$/i;
-  function badge(token){token=token.replace(/\s+/g,'');var fps=/^(\d+)fps$/i.exec(token);if(fps)return fps[1]+' fps';if(/^(?:raw)$/i.test(token))return 'Raw';return token.toUpperCase();}
-  function leadTag(name){var m=/^\s*([A-Za-z0-9]{2,6})\s*(?::|\||\s-\s)\s*\S/.exec(name||'');return m?m[1].toUpperCase():'';}
-  // A lead tag counts as a prefix when it starts at least three names and half of its group.
-  function commonTags(items){var counts=Object.create(null),sizes=Object.create(null),tags=new Set();items.forEach(function(x){var g=x.group||'',t=leadTag(x.name);sizes[g]=(sizes[g]||0)+1;if(t){var k=g+'\n'+t;counts[k]=(counts[k]||0)+1;}});Object.keys(counts).forEach(function(k){var g=k.slice(0,k.lastIndexOf('\n'));if(counts[k]>=3&&counts[k]*2>=sizes[g])tags.add(k.slice(k.lastIndexOf('\n')+1));});return tags;}
-  function cleanName(name,tags){var raw=String(name||'').trim(),badges=[],year='';
-    var text=raw.replace(/[ᴬ-ᵂᵃ-ᶻʰʲʳˡˢˣʷʸⁱⁿ⁰¹²³⁴-⁹ⱽ][ᴬ-ᵂᵃ-ᶻʰʲʳˡˢˣʷʸⁱⁿ⁰¹²³⁴-⁹ⱽ\s]*/g,function(run){run.trim().split(/\s+/).forEach(function(t){var plain=t.split('').map(function(c){var i=SUP.indexOf(c);return i<0?c:PLAIN[i];}).join('');if(plain)badges.push(badge(plain));});return ' ';});
-    text=text.replace(/^[\s#=*~|\-–—•]+|[\s#=*~|\-–—•]+$/g,'');
-    var t=leadTag(text);if(t&&tags&&tags.has(t))text=text.replace(/^\s*[A-Za-z0-9]{2,6}\s*(?::|\||\s-\s)\s*/,'');
-    text=text.replace(/\s*[([](?:19|20)\d{2}[)\]]\s*$/,function(m){year=m.replace(/\D/g,'');return '';});
-    var words=text.trim().split(/\s+/),tail=[];while(words.length>1&&QUALITY.test(words[words.length-1].replace(/[[\]()]/g,'')))tail.unshift(badge(words.pop().replace(/[[\]()]/g,'')));if(tail.length){text=words.join(' ');badges=badges.concat(tail);}
-    text=text.replace(/\s+/g,' ').trim();return {title:text||raw||'Untitled',year:year,badges:badges.filter(function(b,i){return badges.indexOf(b)===i;})};}
-  function groupLabel(group){return cleanName(group).title.replace(/\s*\|\s*/g,' · ');}
+  // Playlist names carry provider decoration: region prefixes, divider runs, styled Unicode letters and quality tags.
+  // Tidying returns the readable name, the quality and stream tags it removed for badges, and the feed notes (RAW, frame
+  // rate) it dropped without a badge.
+  var QUALITY=[['8K',/^(8k|4320p)$/i],['4K',/^(4k|uhd|2160p)$/i],['FHD',/^(fhd|1080[pi])$/i],['HD',/^(hd|720p)$/i],['SD',/^(sd|480[pi]|576[pi])$/i]];
+  var ACRONYMS=/^(A&E|ABC|ACC|AMC|AXN|BBC|BEIN|BET|CBC|CNN|CTV|C-SPAN|DAZN|ESPN|ESPNU|EU|HBO|IFC|ION|ITV|MASN|NASA|NBA|NESN|NFL|OAN|OWN|RAI|RTE|SEC|TUDN|TV|UFC|UK|US|USA|WWE|YES)$/;
+  var SMALL=/^(an|and|at|de|del|el|et|for|in|la|le|of|on|the|to|y)$/i;
+  function words(s){return String(s||'').normalize('NFKC').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);}
+  function shouting(s){var letters=s.replace(/[^A-Za-z]/g,'');return letters.length>=4&&letters===letters.toUpperCase();}
+  function smartCase(s){
+    var tokens=s.split(' '),last=tokens.length-1;return tokens.map(function(token,i){
+      if(ACRONYMS.test(token.replace(/[^A-Za-z&-]/g,''))||/\d/.test(token)||/^(I{2,3}|IV|VI{1,3}|IX)$/.test(token))return token;
+      return token.split('-').map(function(part){var bare=part.replace(/[^A-Za-z]/g,'');if(bare.length<2&&!(i&&i<last&&SMALL.test(bare)))return part;if(ACRONYMS.test(bare)||!/[AEIOUY]/.test(bare))return part;if(i&&i<last&&SMALL.test(bare))return part.toLowerCase();return part.charAt(0)+part.slice(1).toLowerCase();}).join('-');
+    }).join(' ');
+  }
+  function tidyName(raw,context){
+    context=context||{};var original=String(raw==null?'':raw).trim(),s=original.replace(/([^\s\u02B0-\u02FF\u1D2C-\u1D6A\u1D9B-\u1DBF\u2070-\u209F])([\u02B0-\u02FF\u1D2C-\u1D6A\u1D9B-\u1DBF\u2070-\u209F]+)/g,'$1 $2').normalize('NFKC'),region='',quality='',tags=[],notes=[];
+    function addQuality(token){for(var i=0;i<QUALITY.length;i++)if(QUALITY[i][1].test(token)){if(!quality||i<QUALITY.findIndex(function(q){return q[0]===quality;}))quality=QUALITY[i][0];return true;}return false;}
+    function addTag(tag,list){list=list||tags;if(list.indexOf(tag)<0)list.push(tag);}
+    s=s.replace(/[\p{So}\p{Cf}]/gu,' ').replace(/^[\s#=*~_.•·-]+|[\s#=*~_•·-]+$/g,'');var dropped='';
+    // A short code before a pipe or in leading brackets is a region or provider label; a word before a colon is only
+    // dropped when the group already names it, or when it is a region code on a live channel, so titles such as "CSI: Miami" keep their prefix.
+    var prefix=/^[\[(]?\s*([^|:\[\]()]{1,12}?)\s*(?:[\])]\s*[|:-]?|\|)\s*/.exec(s);
+    if(prefix&&prefix[0].length<s.length&&(prefix[0].indexOf('|')>=0||/^[\[(]/.test(prefix[0]))){if(/^[A-Z]{2,3}$/.test(prefix[1]))region=prefix[1];else addQuality(prefix[1]);s=s.slice(prefix[0].length);}
+    var lead=/^([^:]{2,24}):\s+/.exec(s),groupWords=words(context.group);
+    if(lead&&context.kind==='live'&&/^[A-Z]{2,3}$/.test(lead[1])){region=region||lead[1];dropped=lead[1];s=s.slice(lead[0].length);}
+    else if(lead&&words(lead[1]).length&&words(lead[1]).every(function(w){return groupWords.indexOf(w)>=0;})){dropped=lead[1];s=s.slice(lead[0].length);}
+    // Resolution tags count anywhere; looser words (HD, RAW, fps) only after the first word, so "Raw Deal" stays whole.
+    var parts=s.split(/\s+/),kept=[];
+    for(var i=0;i<parts.length;i++){
+      var part=parts[i],token=part.replace(/^[\[(]+|[\])]+$/g,''),first=!kept.length,fps=/^(\d{2,3})$/.test(token)&&/^fps$/i.test(parts[i+1]||'')?token:(/^(\d{2,3})fps$/i.exec(token)||[])[1];
+      if(fps&&!first){addTag(fps+' FPS',notes);if(/^\d+$/.test(token))i++;continue;}
+      if(/^(8k|4k|uhd|2160p|4320p|1080[pi]|720p|576[pi]|480[pi])$/i.test(token)&&addQuality(token))continue;
+      if(!first&&addQuality(token))continue;
+      if(!first&&/^(hdr|hdr10\+?)$/i.test(token)){addTag('HDR');continue;}
+      if(!first&&/^(hevc|h\.?265|x265)$/i.test(token)){addTag('HEVC');continue;}
+      if(!first&&/^raw$/i.test(token)){addTag('RAW',notes);continue;}
+      kept.push(part);
+    }
+    s=kept.join(' ').replace(/[\[(]\s*[\])]/g,'').replace(/\s{2,}/g,' ').replace(/^[\s|:#=*~_.,•·–—-]+|[\s|:#=*~_,•·–—-]+$/g,'');
+    if(!/[\p{L}\p{N}]/u.test(s))return {name:original,region:region,quality:quality,tags:tags,notes:notes};
+    // Capitals are judged on the words that remain plus a dropped prefix, so "SLING: 123 GO!" reads as shouting.
+    return {name:shouting(dropped+' '+s)?smartCase(s):s,region:region,quality:quality,tags:tags,notes:notes};
+  }
+  // Groups keep their region ("US · Sling"). Groups that would read the same keep their tags and notes, then their raw name.
+  function tidyGroups(groups){
+    var tidy=groups.map(function(g){var t=tidyName(g);return {raw:g,t:t,label:(t.region?t.region+' · ':'')+t.name};}),out=Object.create(null);
+    function counts(){var c=Object.create(null);tidy.forEach(function(x){c[x.label]=(c[x.label]||0)+1;});return c;}
+    var c=counts();tidy.forEach(function(x){if(c[x.label]>1){var extra=[x.t.quality].concat(x.t.tags,x.t.notes).filter(Boolean);if(extra.length)x.label+=' · '+extra.join(' ');}});
+    c=counts();tidy.forEach(function(x){out[x.raw]=c[x.label]>1?x.raw:x.label;});return out;
+  }
   function clock(seconds){seconds=Math.max(0,Math.floor(seconds||0));var h=Math.floor(seconds/3600),m=Math.floor(seconds%3600/60),s=String(seconds%60).padStart(2,'0');return h?h+':'+String(m).padStart(2,'0')+':'+s:m+':'+s;}
-  return {httpUrl:httpUrl,hash:hash,parseM3U:parseM3U,xmlTime:xmlTime,parseXMLTV:parseXMLTV,currentProgram:currentProgram,progress:progress,filter:filter,clock:clock,commonTags:commonTags,cleanName:cleanName,groupLabel:groupLabel};
+  return {httpUrl:httpUrl,hash:hash,parseM3U:parseM3U,xmlTime:xmlTime,parseXMLTV:parseXMLTV,currentProgram:currentProgram,progress:progress,filter:filter,tidyName:tidyName,tidyGroups:tidyGroups,clock:clock};
 });
