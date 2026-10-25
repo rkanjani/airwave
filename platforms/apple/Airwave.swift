@@ -393,11 +393,19 @@ enum PlaybackTiming {
     private var probe: Any?
     private var baseline: Double?
     private var started = false
+    private var resolving: Task<Void, Never>?
     var time: Double { finite(player.currentTime().seconds) }
     var duration: Double { finite(player.currentItem?.duration.seconds ?? 0) }
     var volume: Float { get { player.volume } set { player.volume = newValue } }
     var muted: Bool { get { player.isMuted } set { player.isMuted = newValue } }
     func load(_ url: URL, resume: Double) {
+        resolving = Task { [weak self] in
+            let source = await RedirectResolver.resolve(url)
+            guard !Task.isCancelled, let self else { return }
+            self.attach(source, resume: resume)
+        }
+    }
+    private func attach(_ url: URL, resume: Double) {
         let item = AVPlayerItem(url: url)
         player.replaceCurrentItem(with: item)
         observers = [
@@ -452,12 +460,36 @@ enum PlaybackTiming {
     func pause() { player.pause() }
     func seek(to seconds: Double) { player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600)) }
     func close() {
+        resolving?.cancel(); resolving = nil
         onEvent = { _ in }
         observers.forEach { $0.invalidate() }; observers = []
         notices.forEach { NotificationCenter.default.removeObserver($0) }; notices = []
         for observer in [probe, ticker].compactMap({ $0 }) { player.removeTimeObserver(observer) }
         probe = nil; ticker = nil
         player.pause(); player.replaceCurrentItem(with: nil)
+    }
+}
+
+// Providers often answer a channel URL with a 302 to a session host, and AVPlayer requests an HLS playlist
+// twice while starting, paying that redirect and a new connection each time; later refreshes already use the
+// target. Following the redirect once here and handing AVPlayer the target saves one of those legs. Hosts that
+// answered directly are remembered for the session so they skip the check. Any failure keeps the original URL.
+@MainActor enum RedirectResolver {
+    private static var direct: Set<String> = []
+    private final class StopAtRedirect: NSObject, URLSessionTaskDelegate {
+        func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
+    }
+    private static let session = URLSession(configuration: .ephemeral)
+    static func resolve(_ url: URL) async -> URL {
+        guard let host = url.host?.lowercased(), !direct.contains(host) else { return url }
+        var request = URLRequest(url: url); request.timeoutInterval = 3
+        guard let answer = try? await session.bytes(for: request, delegate: StopAtRedirect()) else { return url }
+        answer.0.task.cancel()
+        // One hop: checking the target for another redirect would cost the full request this saves.
+        guard let http = answer.1 as? HTTPURLResponse, (300..<400).contains(http.statusCode),
+              let location = http.value(forHTTPHeaderField: "Location"), let target = URL(string: location, relativeTo: url)?.absoluteURL,
+              ["http", "https"].contains(target.scheme?.lowercased() ?? "") else { direct.insert(host); return url }
+        return target
     }
 }
 
