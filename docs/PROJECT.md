@@ -181,7 +181,7 @@ no earlier Git history, tag, merged PR or removal record to reconstruct here.
 | 2026-10-24 | Apple playback no longer shows the web and native player screens together; focus returns to the row that started playback; search waits for a typing pause | `480afd1` |
 | 2026-10-24 | AVPlayer starts follow a provider redirect once instead of on each of its two initial playlist requests | `76cdad6` |
 | 2026-10-24 | Library tiles show catalog artwork and XMLTV programme images, with tinted fallbacks and viewport-limited loading | `69402e1` |
-| 2026-10-25 | Live tiles show a still of the channel, grabbed serially through the relay (ffmpeg) and natively on Apple (mpv), with the logo as fallback | this change |
+| 2026-10-25 | Live tiles show a still of the channel, grabbed serially through the relay (ffmpeg) and natively on Apple (mpv), with the logo as fallback | `843add1` |
 
 The initial import is evidence of the current implementation, not a claim that all its
 features were originally written in that commit. Pre-import observations are recorded
