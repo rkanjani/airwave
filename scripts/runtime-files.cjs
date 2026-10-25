@@ -3,7 +3,7 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 // Explicit allowlist: private catalogs, test harnesses and machine files never ship.
 const files = [
-  'index.html', 'styles.css', 'core.js', 'platform.js', 'player.js', 'app.js',
+  'index.html', 'styles.css', 'core.js', 'platform.js', 'player.js', 'cast.js', 'app.js',
   'config.xml', 'assets/icon.svg', 'assets/icon.png',
   'vendor/hls.min.js', 'vendor/HLS-LICENSE',
 ];

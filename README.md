@@ -15,8 +15,9 @@ Samsung target is Tizen 6.0+. Physical iOS and Samsung TV playback remain unveri
 | `app/core.js` | Shared playlist parsing, filters, programme times |
 | `app/app.js`, `app/styles.css` | Shared home, search, favorites, Live TV channels and guide, details, player controls; phone bottom navigation, desktop/TV sidebar |
 | `app/player.js` | Generation-scoped playback lifecycle; browser video/HLS.js, Samsung AVPlay, Apple bridge |
+| `app/cast.js` | Chrome Cast sender for the default media receiver; drives the shared player controls while casting |
 | `app/platform.js` | Private library and text import adapters |
-| `server/` + `scripts/serve.cjs` | Local web relay: provider URLs stay server-side, same-origin opaque media URLs, HLS rewriting and Range support |
+| `server/` + `scripts/serve.cjs` | Local web relay: provider URLs stay server-side, same-origin opaque media URLs, HLS rewriting and Range support; opt-in token-protected LAN cast listener |
 | `platforms/apple/Airwave.swift` | iOS/macOS SwiftUI shell, bundled WKWebView, native AVPlayer controls, document picker, AES-GCM catalog storage with Keychain key |
 | `app/config.xml` | Samsung TV packaging and privileges |
 
@@ -32,7 +33,7 @@ npm run check
 npm run release
 ```
 
-The check runs 20 active tests plus one pending Samsung version-parity expectation. The release command creates a static runtime archive in `dist/`, with no private catalog or Node relay.
+The check runs 37 active tests plus one pending Samsung version-parity expectation. The release command creates a static runtime archive in `dist/`, with no private catalog or Node relay.
 
 ## Run the web app
 
@@ -52,6 +53,22 @@ Keep private catalog JSON outside this checkout. It can contain provider credent
 The relay binds to loopback only, validates Host and Origin, uses an HttpOnly SameSite cookie, and accepts only registered upstream resources. It rejects private-network upstream destinations and revalidates redirects. It is a **single-user local web app**, not a public hosted service. Public hosting needs real user authentication, per-user encrypted catalog storage, HTTPS, rate limits, and provider-compatible deployment before exposing a relay.
 
 Static hosting of `app/` also runs the interface and direct-source player, subject to provider CORS and HTTPS/mixed-content restrictions. The private local relay is required for the tested provider setup in Chromium.
+
+## Cast to a TV
+
+The player shows a Cast button in Chrome (the web app) and in the iOS app when a Cast device is on the network. The macOS app and Samsung TV don't offer casting. Titles play on the device's default media receiver, and the Airwave controls drive playback until you disconnect; in Chrome, playback then resumes on this screen at the same position.
+
+- **Demo and M3U titles** are cast as their own URLs. The Cast device fetches them directly, so the source has to allow it: HLS streams need the provider to send CORS headers.
+- **Private-library titles in the web app** stay behind the relay. Start it with the cast listener turned on:
+
+  ```sh
+  AIRWAVE_CAST=1 AIRWAVE_LIBRARY_PATH='/absolute/path/to/private/library.json' npm start
+  ```
+
+  The relay then also listens on this computer's local network address (port `AIRWAVE_PORT`+1, or `AIRWAVE_CAST_PORT`; set `AIRWAVE_CAST_HOST` to choose the address). It serves only registered library media, behind a random token in the URL that rotates with each cast, is revoked when casting stops and expires after 12 hours. Anyone on the same network who obtains a current URL can watch that library's streams until then. Provider URLs and credentials stay in the relay process, and the relay adds the CORS headers the receiver needs.
+- **iOS** casts from the Cast button beside Back in the native player, or plays straight to an already connected device. Native code hands the receiver the provider URL, so it never passes through JavaScript, but the provider must allow cross-origin HLS requests. iOS asks for local network access the first time you cast.
+
+Casting relies on Google's Cast SDKs: Chrome loads Google's sender script the first time you open the player, and the iOS target links the Google Cast SDK Swift package. Casting to real devices has not been verified; see `VERIFICATION.md`.
 
 ## Apple apps
 
