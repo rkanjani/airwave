@@ -11,6 +11,8 @@ Demo streams are external trailers, not bundled films:
 
 The landscape illustration is decorative Airwave artwork, not a frame or poster from either film. Sample channel names are fictional navigation examples and do not claim broadcast carriage.
 
+Casting uses Google Cast SDKs, which are not included in the source: Chrome loads Google's Cast sender script from www.gstatic.com when the player first opens, and the iOS target resolves the Google Cast iOS SDK 4.8.6 (with gtm-session-fetcher) through Swift Package Manager from https://github.com/googlecast/google-cast-ios-sdk . The SDK binaries are distributed under Google's Cast SDK terms, https://developers.google.com/cast/docs/terms .
+
 HLS.js 1.7.3 is bundled under the Apache License 2.0. See `app/vendor/HLS-LICENSE` and https://github.com/video-dev/hls.js . Imported provider artwork is loaded at runtime and is not included in the source package.
 
 Original Airwave code and artwork are MIT licensed; see `LICENSE`. Third-party HLS.js retains its Apache-2.0 license. External media and provider artwork retain their respective owners' terms and are not relicensed by Airwave.

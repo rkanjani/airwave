@@ -12,7 +12,7 @@
     this.close();var self=this,g=this.generation;this.active=true;this.preparing=true;this.resumeAt=resume||0;
     function alive(){return self.active&&self.generation===g;}
     function fail(){if(!alive())return;self.close();self.emit('error','Unable to play this stream. Check the link, connection, and supported video format.');}
-    if(this.native){window.__airwaveNativePlayback=function(event,data,token){if(token===g&&alive())self.emit(event,data);};window.AirwavePlatform.request('play',{url:item.url,id:item.id,resume:this.resumeAt,token:g,title:item.name}).then(function(){if(alive()){self.preparing=false;}}).catch(fail);return;}
+    if(this.native){window.__airwaveNativePlayback=function(event,data,token){if(token===g&&alive())self.emit(event,data);};window.AirwavePlatform.request('play',{url:item.url,id:item.id,kind:item.kind,resume:this.resumeAt,token:g,title:item.name}).then(function(){if(alive()){self.preparing=false;}}).catch(fail);return;}
     this.timer=setTimeout(fail,30000);this.emit('loading','Connecting…');
     if(this.av){
       try{

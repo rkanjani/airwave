@@ -5,11 +5,17 @@ import AVKit
 import CryptoKit
 import Security
 import UniformTypeIdentifiers
+#if os(iOS)
+import GoogleCast
+#endif
 
 @main
 struct AirwaveApp: App {
     @StateObject private var model = AirwaveModel()
     @Environment(\.scenePhase) private var scenePhase
+    #if os(iOS)
+    init() { AirwaveCast.configure() }
+    #endif
     var body: some Scene {
         WindowGroup {
             ZStack {
@@ -48,10 +54,14 @@ final class AirwaveModel: NSObject, ObservableObject, WKScriptMessageHandler, WK
     private var documentDelegate: AnyObject?
     private let store = PrivateCatalogStore()
     private var networkTasks: [String: Task<Void, Never>] = [:]
+    private var castItem: CastItem?
 
     func configure(_ view: WKWebView) {
         webView = view
         view.navigationDelegate = self
+        #if os(iOS)
+        GCKCastContext.sharedInstance().sessionManager.add(self)
+        #endif
         guard let url = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: "app") else { return }
         view.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
     }
@@ -73,7 +83,13 @@ final class AirwaveModel: NSObject, ObservableObject, WKScriptMessageHandler, WK
             var raw = media[key]?["url"] as? String ?? payload["url"] as? String ?? ""
             if media[key]?["kind"] as? String == "live" { raw = raw.replacingOccurrences(of: ".ts?", with: ".m3u8?"); if raw.hasSuffix(".ts") { raw = String(raw.dropLast(3)) + ".m3u8" } }
             guard let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return reply(id, error: "Unsupported media URL.") }
-            start(url, resume: payload["resume"] as? Double ?? 0, token: payload["token"] as? Int ?? 0)
+            let resume = payload["resume"] as? Double ?? 0, token = payload["token"] as? Int ?? 0
+            castItem = CastItem(url: url, title: payload["title"] as? String ?? "Airwave", live: (media[key]?["kind"] as? String ?? payload["kind"] as? String) == "live")
+            #if os(iOS)
+            // With a Cast device already connected, the title plays there instead of on this screen.
+            if let item = castItem, cast(item, from: resume) { reply(id, result: true); return emit("native-closed", token: token) }
+            #endif
+            start(url, resume: resume, token: token)
             reply(id, result: true)
         case "stop": stop(); reply(id, result: true)
         case "toggle": if player?.rate == 0 { player?.play() } else { player?.pause() }; reply(id, result: true)
@@ -191,7 +207,51 @@ final class AirwaveModel: NSObject, ObservableObject, WKScriptMessageHandler, WK
         #endif
     }
 }
+struct CastItem { let url: URL; let title: String; let live: Bool }
+
 #if os(iOS)
+// Casting hands the receiver the item's real URL from native code; JavaScript only ever sees the opaque ID.
+// The default media receiver fetches the source itself, so HLS needs the provider to allow cross-origin requests.
+enum AirwaveCast {
+    static func configure() {
+        let options = GCKCastOptions(discoveryCriteria: GCKDiscoveryCriteria(applicationID: kGCKDefaultMediaReceiverApplicationID))
+        options.physicalVolumeButtonsWillControlDeviceVolume = true
+        GCKCastContext.setSharedInstanceWith(options)
+        GCKCastContext.sharedInstance().useDefaultExpandedMediaControls = true
+    }
+    static func contentType(_ item: CastItem) -> String {
+        if item.live { return "application/x-mpegurl" }
+        return ["m3u8": "application/x-mpegurl", "mov": "video/quicktime", "webm": "video/webm", "mkv": "video/x-matroska", "ts": "video/mp2t"][item.url.pathExtension.lowercased()] ?? "video/mp4"
+    }
+}
+struct AirwaveCastButton: UIViewRepresentable {
+    func makeUIView(context: Context) -> GCKUICastButton { let button = GCKUICastButton(frame: CGRect(x: 0, y: 0, width: 44, height: 44)); button.tintColor = .white; return button }
+    func updateUIView(_ view: GCKUICastButton, context: Context) {}
+}
+extension AirwaveModel: GCKSessionManagerListener {
+    // Connecting while a title plays here moves it to the receiver at the same position.
+    nonisolated func sessionManager(_ manager: GCKSessionManager, didStart session: GCKCastSession) {
+        Task { @MainActor in
+            guard let item = self.castItem, let p = self.player else { return }
+            if self.cast(item, from: p.currentTime().seconds) { self.stop() }
+        }
+    }
+    @discardableResult func cast(_ item: CastItem, from position: Double) -> Bool {
+        guard let client = GCKCastContext.sharedInstance().sessionManager.currentCastSession?.remoteMediaClient else { return false }
+        let metadata = GCKMediaMetadata(metadataType: item.live ? .generic : .movie)
+        metadata.setString(item.title, forKey: kGCKMetadataKeyTitle)
+        let info = GCKMediaInformationBuilder(contentURL: item.url)
+        info.streamType = item.live ? .live : .buffered
+        info.contentType = AirwaveCast.contentType(item)
+        info.metadata = metadata
+        let request = GCKMediaLoadRequestDataBuilder()
+        request.mediaInformation = info.build(); request.autoplay = true
+        request.startTime = item.live || !position.isFinite ? 0 : position
+        client.loadMedia(with: request.build())
+        GCKCastContext.sharedInstance().presentDefaultExpandedMediaControls()
+        return true
+    }
+}
 @MainActor final class ImportDelegate: NSObject, UIDocumentPickerDelegate {
     let completion: (URL?) -> Void
     init(_ completion: @escaping (URL?) -> Void) { self.completion = completion }
@@ -404,7 +464,12 @@ struct AirwavePlayerOverlay: View {
                 .opacity(shown ? 1 : 0).offset(y: shown || reduceMotion ? 0 : 10).allowsHitTesting(shown)
                 .frame(maxHeight: .infinity, alignment: .bottom).padding(.bottom, 24)
             #endif
-            BackButton(action: close)
+            HStack(spacing: 12) {
+                BackButton(action: close)
+                #if os(iOS)
+                AirwaveCastButton().frame(width: 44, height: 44)
+                #endif
+            }
                 .opacity(shown ? 1 : 0).offset(x: shown || reduceMotion ? 0 : -10).allowsHitTesting(shown)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(20)
         }
