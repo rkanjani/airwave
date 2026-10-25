@@ -160,6 +160,8 @@ no earlier Git history, tag, merged PR or removal record to reconstruct here.
 | 2026-10-24 | Apple apps pick AVPlayer or mpv (MPVKit) per title, with one-time fallback, raw-TS live start-up and MKV/AVI playback | `532f99b` |
 | 2026-10-24 | Replaced the signal-arc icon with the wave bands mark across favicon, Samsung icon and in-app brand | `6c74acf` |
 | 2026-10-24 | Added Tidy names (on by default): cleaned channel and group names with resolution and HDR/HEVC badges | `b9d6c93` |
+| 2026-10-24 | Apple playback no longer shows the web and native player screens together; focus returns to the row that started playback; search waits for a typing pause | `480afd1` |
+| 2026-10-24 | AVPlayer starts follow a provider redirect once instead of on each of its two initial playlist requests | `76cdad6` |
 | 2026-10-24 | Library tiles show catalog artwork and XMLTV programme images, with tinted fallbacks and viewport-limited loading | `69402e1` |
 
 The initial import is evidence of the current implementation, not a claim that all its
@@ -200,6 +202,9 @@ in `VERIFICATION.md`; their private test data and screenshots are deliberately a
 The interface redesign removed `app/assets/horizon.svg` (decorative placeholder artwork) and
 folded the separate Guide destination into Live TV as a Channels / Guide switch. No other
 tracked files or shipped features have been removed.
+Two AVPlayer start-up ideas were measured and dropped in `76cdad6`: serving the first playlist from a single
+fetch through a resource loader (no faster against a live-style test stream) and disabling
+`automaticallyWaitsToMinimizeStalling` (playback reported playing and never advanced).
 The pre-import SwiftUI VideoPlayer approach was replaced with native view wrappers;
 no earlier source revision is present here. The public repository never included private
 catalogs, device exports, user-specific verification details or credential-bearing screenshots.
