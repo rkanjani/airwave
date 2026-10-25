@@ -13,6 +13,7 @@ Samsung target is Tizen 6.0+. Physical iOS and Samsung TV playback remain unveri
 | Layer | Responsibility |
 |---|---|
 | `app/core.js` | Shared playlist parsing, filters, programme times |
+| `app/sports.js` | Followed leagues, scoreboard parsing and matching games to channels |
 | `app/app.js`, `app/styles.css` | Shared home, search, favorites, Live TV channels and guide, details, player controls; phone bottom navigation, desktop/TV sidebar |
 | `app/player.js` | Generation-scoped playback lifecycle; browser video/HLS.js, Samsung AVPlay, Apple bridge |
 | `app/cast.js` | Chrome Cast sender for the default media receiver; drives the shared player controls while casting |
@@ -23,7 +24,7 @@ Samsung target is Tizen 6.0+. Physical iOS and Samsung TV playback remain unveri
 | `platforms/android/` | Android phone/tablet/TV shell: bundled WebView, origin-restricted bridge, Media3 ExoPlayer playback with fallback, Keystore-sealed catalog, native artwork cache, TV banner and D-pad support |
 | `platforms/roku/` | Roku SceneGraph channel: BrightScript port of the playlist parser and catalog contract, Video node playback, registry-stored preferences |
 
-Apple apps bundle the interface and connect directly to the provider; they do not depend on the local web server. Native catalog credentials never enter the web view. Tile artwork comes from the catalog's logos and posters (resolved natively on Apple, through the relay on the web) and from XMLTV programme icons; titles without artwork show their name on a flat tint. The web relay keeps provider credentials out of the browser library payload. Web and Apple catalogs are private, device-local copies; there is no cloud synchronization.
+Apple apps bundle the interface and connect directly to the provider; they do not depend on the local web server. Native catalog credentials never enter the web view. Tile artwork comes from the catalog's logos and posters (resolved natively on Apple, through the relay on the web) and from XMLTV programme icons; titles without artwork show their name on a flat tint. Live channel tiles on screen also show a still of what the channel is playing, grabbed one channel at a time and never during playback: through the relay when `ffmpeg` is installed (or `AIRWAVE_FFMPEG` points at it; `AIRWAVE_PREVIEWS=0` turns stills off), and natively with mpv on Apple. The logo stays until a still arrives or when a grab fails. The web relay keeps provider credentials out of the browser library payload. Web and Apple catalogs are private, device-local copies; there is no cloud synchronization.
 
 ## Development
 
@@ -35,7 +36,7 @@ npm run check
 npm run release
 ```
 
-The check runs 60 active tests (including Roku parity under `brs-node` and BrighterScript validation) plus one pending Samsung version-parity expectation. The release command creates a static runtime archive in `dist/`, with no private catalog or Node relay.
+The check runs 74 active tests (including Roku parity under `brs-node` and BrighterScript validation) plus one pending Samsung version-parity expectation. The release command creates a static runtime archive in `dist/`, with no private catalog or Node relay.
 
 ## Run the web app
 
@@ -141,6 +142,7 @@ This produces a signed widget in `dist/`. Source ZIPs are not installable widget
 ## Features and boundaries
 
 - Library browsing, title/group search, favorites, movie progress that resumes where you stopped, one-click playback from any tile, M3U and XMLTV import, remote/keyboard navigation.
+- Sports scores: follow leagues (NFL, NBA, MLB, NHL, WNBA, MLS, college football and basketball, Premier League, Champions League) in Settings to see their games at the top of Home. Choosing a game plays the channel that the guide, the channel names or the broadcaster point to. Scores come from ESPN's public scoreboard feed and load only while a league is followed.
 - Browser and Samsung playback share one control layer: movies get a seek bar the remote scrubs (left/right to choose, OK to jump, Back to cancel), skip 10 seconds and Start over; live channels show the current programme, what is next and a Guide shortcut.
 - Phone layout uses touch-sized controls and safe-area spacing. macOS native playback uses a compact Airwave control bar; iOS uses system video controls for AVPlayer and the compact bar for mpv.
 - The Apple apps choose a player per title: AVPlayer for HLS and MP4/MOV/M4V (and whenever AirPlay is in use), mpv for live channels given as raw `.ts`, MKV, AVI and other containers. If one can't start a title, the other gets one try, and the one that worked is used for that title until the app quits. AirPlay is offered only while AVPlayer plays.

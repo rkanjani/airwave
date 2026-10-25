@@ -21,4 +21,6 @@ The Android app resolves AndroidX Media3 1.11.1 (ExoPlayer, HLS and UI), Android
 
 HLS.js 1.7.3 is bundled under the Apache License 2.0. See `app/vendor/HLS-LICENSE` and https://github.com/video-dev/hls.js . Imported provider artwork is loaded at runtime and is not included in the source package.
 
+When a sports league is followed, scores, team names and team logos are loaded at runtime from ESPN's public scoreboard feed (site.api.espn.com, a.espncdn.com). They are not included in the source and remain the property of ESPN, the leagues and the teams.
+
 Original Airwave code and artwork are MIT licensed; see `LICENSE`. Third-party HLS.js retains its Apache-2.0 license, and MPVKit, mpv, FFmpeg and their libraries retain theirs. External media and provider artwork retain their respective owners' terms and are not relicensed by Airwave.
