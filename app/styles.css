@@ -23,19 +23,10 @@ main{margin-left:var(--sidebar);min-height:100vh;min-width:0}
 .page-header h1{font-size:1.5rem;font-weight:600;letter-spacing:-.01em}.page-header p{margin-top:.375rem;color:var(--muted);font-size:.875rem;line-height:1.5}.page-header .clock{color:var(--muted);font-size:.9375rem;padding-top:.25rem}
 .header-actions{display:flex;align-items:center;gap:.75rem;flex:none}
 .section-head{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;margin-bottom:.75rem}.section-head h2{font-size:1rem;font-weight:600}
-.shelf{margin-top:2rem}
+.shelf{margin-top:2rem}.page-header+.shelf{margin-top:0}
 
-/* Home: the lead answers "what do I watch now?" */
-.lead{display:grid;grid-template-columns:minmax(0,2fr) minmax(17rem,1fr);gap:1rem}.lead.single{grid-template-columns:minmax(0,1fr)}
-.feature{display:flex;flex-direction:column;justify-content:space-between;min-height:18rem;padding:2rem;border-radius:20px;background:var(--surface)}
-.feature-label{color:var(--muted);font-size:.875rem;margin-bottom:.875rem}.feature h2{font-size:2rem;font-weight:600;letter-spacing:-.02em;line-height:1.15}
-.meta{margin-top:.5rem;color:var(--muted);font-size:.875rem}.feature-text{margin-top:1.125rem;max-width:35rem;font-size:1rem;line-height:1.55}
-.resume{max-width:26rem;margin-top:1.25rem}.resume p{margin-top:.5rem;font-size:.8125rem;color:var(--muted)}
+.meta{margin-top:.5rem;color:var(--muted);font-size:.875rem}
 .actions{display:flex;flex-wrap:wrap;gap:.625rem;margin-top:1.75rem}
-.on-now{padding:1.375rem 1.375rem .875rem;border-radius:20px;background:var(--surface)}.on-now .section-head{margin-bottom:.25rem}
-.now-row{display:block;width:100%;padding:.75rem .5rem;margin:0 -.5rem;width:calc(100% + 1rem);border-radius:12px;border-bottom:1px solid var(--line)}.now-row:last-child{border-bottom:0}.now-row:hover{background:var(--raised)}
-.now-row .row-top{display:flex;justify-content:space-between;gap:.75rem}.now-row strong{font-size:.9375rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.now-row small{color:var(--faint);font-size:.75rem;white-space:nowrap}
-.now-row .row-sub{display:block;margin-top:.25rem;color:var(--muted);font-size:.8125rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.now-row .progress{margin-top:.625rem}
 .footnotes{margin-top:2.5rem;color:var(--faint);font-size:.8125rem;line-height:1.7}
 
 /* Scores: one flat tile per followed game, live games first; the accent dot marks a game in progress. */
@@ -59,12 +50,13 @@ main{margin-left:var(--sidebar);min-height:100vh;min-width:0}
 .art-logo{position:absolute;z-index:1;left:.625rem;bottom:.625rem;display:flex;width:3.25rem;height:2.125rem;padding:.3125rem;border-radius:6px;background:rgba(0,0,0,.72);opacity:0;transition:opacity .3s}.art-logo.ready{opacity:1}.art-logo .art-img{position:static;object-fit:contain}
 .channel .art .art-img.art-frame{top:0;left:0;width:100%;height:100%;object-fit:cover}.channel .art .art-logo .art-img{width:100%;height:100%}.art.logo:not(.framed) .art-logo{opacity:0}
 .card.movie{flex-basis:10rem}.movie .art{height:15rem}.movie .art-name{-webkit-line-clamp:5}
+.art-progress{position:absolute;z-index:1;right:0;bottom:0;left:0;padding:1.5rem .625rem .625rem;background:linear-gradient(transparent,rgba(0,0,0,.7))}.art-progress .progress{height:4px;background:rgba(255,255,255,.28)}.card.resumed .art{padding-bottom:1.625rem}
 .card-info{display:block;padding:.625rem .125rem 0}.card-title{display:block;font-size:.875rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .card-sub{display:block;margin-top:.1875rem;color:var(--faint);font-size:.75rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.card-info .progress{margin-top:.5rem}
 /* Quality badges replace the tags Tidy names removes: the resolution is filled, stream tags are outlined. */
 .badges{display:inline-flex;align-items:center;flex:none;margin-left:.5rem;vertical-align:middle;line-height:1}.badge{display:inline-block;padding:.1875rem .3125rem;border:1px solid var(--control);border-radius:4px;color:var(--muted);font-size:.6875rem;font-weight:600;letter-spacing:.04em;line-height:1;white-space:nowrap}.badge+.badge{margin-left:.25rem}.badge.quality{border-color:#fff;background:#fff;color:#000;font-weight:700}
 .art .badges{position:absolute;z-index:1;top:.5rem;right:.5rem;margin:0}.art .badge{border-color:rgba(255,255,255,.3);background:rgba(0,0,0,.72);color:#fff}.art .badge.quality{border-color:#fff;background:#fff;color:#000}
-.named{display:flex;align-items:center;min-width:0}.named strong{min-width:0}.guide-channel .badges{margin-left:.375rem}.feature h2 .badges,.dialog h2 .badges{margin-left:.75rem}
+.named{display:flex;align-items:center;min-width:0}.named strong{min-width:0}.guide-channel .badges{margin-left:.375rem}.dialog h2 .badges{margin-left:.75rem}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(13rem,1fr));align-items:start;gap:1.5rem 1rem}.grid .card{width:100%}.grid.movies{grid-template-columns:repeat(auto-fill,minmax(10rem,1fr))}
 
 /* Filters */
@@ -153,7 +145,7 @@ main{margin-left:var(--sidebar);min-height:100vh;min-width:0}
 #rail .brand,#rail .library-name,#rail .nav-spacer,#rail .nav-utility{display:none}
 .nav-button{flex:1 1 0;min-width:0;flex-direction:column;justify-content:center;gap:.25rem;min-height:3.5rem;margin:0;padding:0;border-radius:12px;font-size:.6875rem;color:var(--faint)}.nav-button svg{width:1.375rem;height:1.375rem}.nav-button.active{background:none;color:#fff;font-weight:500}.nav-button span{white-space:nowrap}
 .page{padding-top:1.25rem}.page-header{flex-wrap:wrap}.page-header h1{font-size:1.375rem}.page-header .clock{display:none}
-.lead{grid-template-columns:minmax(0,1fr)}.feature{min-height:0;padding:1.25rem}.feature h2{font-size:1.5rem}.feature-text{font-size:.9375rem}.actions .button{flex:1 1 auto}
+.actions .button{flex:1 1 auto}
 .card{flex-basis:11.5rem}.game{flex-basis:13.5rem}.art{height:6.5rem}.card.movie{flex-basis:8.75rem}.movie .art{height:13rem}.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:1.25rem .75rem}.grid.movies{grid-template-columns:repeat(auto-fill,minmax(8.5rem,1fr))}.art-name{font-size:1rem}
 .rows,.rows.four{grid-template-columns:minmax(0,1fr)}.rows.four{grid-template-columns:repeat(2,minmax(0,1fr));column-gap:1.5rem}
 .setting{grid-template-columns:minmax(0,1fr);gap:1rem;padding:1.5rem 0}.setting-panel{flex-direction:column;align-items:stretch}
