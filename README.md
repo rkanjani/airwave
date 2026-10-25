@@ -13,6 +13,7 @@ Samsung target is Tizen 6.0+. Physical iOS and Samsung TV playback remain unveri
 | Layer | Responsibility |
 |---|---|
 | `app/core.js` | Shared playlist parsing, filters, programme times |
+| `app/sports.js` | Followed leagues, scoreboard parsing and matching games to channels |
 | `app/app.js`, `app/styles.css` | Shared home, search, favorites, Live TV channels and guide, details, player controls; phone bottom navigation, desktop/TV sidebar |
 | `app/player.js` | Generation-scoped playback lifecycle; browser video/HLS.js, Samsung AVPlay, Apple bridge |
 | `app/cast.js` | Chrome Cast sender for the default media receiver; drives the shared player controls while casting |
@@ -111,6 +112,7 @@ This produces a signed widget in `dist/`. Source ZIPs are not installable widget
 ## Features and boundaries
 
 - Library browsing, title/group search, favorites, movie progress with a resume choice, details, M3U and XMLTV import, remote/keyboard navigation.
+- Sports scores: follow leagues (NFL, NBA, MLB, NHL, WNBA, MLS, college football and basketball, Premier League, Champions League) in Settings to see their games at the top of Home. Choosing a game plays the channel that the guide, the channel names or the broadcaster point to. Scores come from ESPN's public scoreboard feed and load only while a league is followed.
 - Browser and Samsung playback share one control layer: movies get a seek bar the remote scrubs (left/right to choose, OK to jump, Back to cancel), skip 10 seconds and Start over; live channels show the current programme, what is next and a Guide shortcut.
 - Phone layout uses touch-sized controls and safe-area spacing. macOS native playback uses a compact Airwave control bar; iOS uses system video controls for AVPlayer and the compact bar for mpv.
 - The Apple apps choose a player per title: AVPlayer for HLS and MP4/MOV/M4V (and whenever AirPlay is in use), mpv for live channels given as raw `.ts`, MKV, AVI and other containers. If one can't start a title, the other gets one try, and the one that worked is used for that title until the app quits. AirPlay is offered only while AVPlayer plays.
