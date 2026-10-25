@@ -135,6 +135,7 @@ no earlier Git history, tag, merged PR or removal record to reconstruct here.
 | 2026-10-24 | Redesigned the shared interface; merged Guide into Live TV; added movie seek/resume and live-programme player controls | `efef441` |
 | 2026-10-24 | Added casting from Chrome and iOS, with an opt-in token-protected LAN cast listener for private-library items | `409c158` |
 | 2026-10-24 | Replaced the macOS system player bar with compact Airwave controls; search results play directly | `4402043` |
+| 2026-10-24 | Added Tidy names (on by default): cleaned channel and group names with resolution and HDR/HEVC badges | `b9d6c93` |
 
 The initial import is evidence of the current implementation, not a claim that all its
 features were originally written in that commit. Pre-import observations are recorded
