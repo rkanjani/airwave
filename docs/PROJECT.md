@@ -197,6 +197,7 @@ no earlier Git history, tag, merged PR or removal record to reconstruct here.
 | 2026-10-25 | macOS and iOS apps use the wave bands mark as their app icon | `8dea7f8` |
 | 2026-10-25 | Home shows scores for sports leagues followed in Settings; choosing a game plays the matching channel | `53310bf` |
 | 2026-10-25 | Live tiles show a still of the channel, grabbed serially through the relay (ffmpeg) and natively on Apple (mpv), with the logo as fallback | `843add1` |
+| 2026-10-25 | Home opens on Continue watching: resumed movies show their progress on the poster, and the lead card and On now panel are gone | `b349254`, `7b059e9` |
 
 The initial import is evidence of the current implementation, not a claim that all its
 features were originally written in that commit. Pre-import observations are recorded
