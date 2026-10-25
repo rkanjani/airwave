@@ -121,6 +121,9 @@ CI runs on GitHub Actions. There is no analytics, cloud-sync or Airwave account 
   (`tests/cast.test.cjs`). The page receives only the LAN URL and content type, never upstream URLs.
 - iOS casting passes the native item's provider URL to the receiver from Swift; it is not
   exposed to JavaScript. The bridge `play` payload now also carries the item `kind`.
+- The player's top-right heart toggles the playing title's favorite. The bridge `play` payload
+  carries its current `favorite` state; the native overlay reports taps as a `favorite` playback
+  event, and JavaScript storage stays the only favorites store.
 - There is no cross-device sync or provider refresh UI. IDs must remain stable to retain
   favorites and movie progress; changing storage shape needs an explicit migration.
 
@@ -139,6 +142,7 @@ no earlier Git history, tag, merged PR or removal record to reconstruct here.
 | 2026-10-24 | Added casting from Chrome and iOS, with an opt-in token-protected LAN cast listener for private-library items | `409c158` |
 | 2026-10-24 | Replaced the macOS system player bar with compact Airwave controls; search results play directly | `4402043` |
 | 2026-10-24 | Apple apps pick AVPlayer or mpv (MPVKit) per title, with one-time fallback, raw-TS live start-up and MKV/AVI playback | `532f99b` |
+| 2026-10-24 | Replaced the signal-arc icon with the wave bands mark across favicon, Samsung icon and in-app brand | `6c74acf` |
 | 2026-10-24 | Apple playback no longer shows the web and native player screens together; focus returns to the row that started playback; search waits for a typing pause | `480afd1` |
 | 2026-10-24 | AVPlayer starts follow a provider redirect once instead of on each of its two initial playlist requests | `76cdad6` |
 

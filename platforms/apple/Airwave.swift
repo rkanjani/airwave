@@ -27,7 +27,7 @@ struct AirwaveApp: App {
             ZStack {
                 AirwaveWebView(model: model)
                 if let playback = model.playback {
-                    AirwavePlayerOverlay(state: playback) { model.stop() }
+                    AirwavePlayerOverlay(state: playback, favorite: model.favorite, toggleFavorite: { model.toggleFavorite() }) { model.stop() }
                         .id(ObjectIdentifier(playback)).transition(.opacity)
                 }
             }
@@ -49,6 +49,7 @@ struct AirwaveApp: App {
 @MainActor
 final class AirwaveModel: NSObject, ObservableObject, WKScriptMessageHandler, WKNavigationDelegate {
     @Published var playback: PlaybackState?
+    @Published var favorite = false
     weak var webView: WKWebView?
     private var catalog: [String: Any]?
     private var media: [String: [String: Any]] = [:]
@@ -92,6 +93,7 @@ final class AirwaveModel: NSObject, ObservableObject, WKScriptMessageHandler, WK
             guard let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return reply(id, error: "Unsupported media URL.") }
             let next = PlayRequest(key: key, url: url, live: (media[key]?["kind"] as? String ?? payload["kind"] as? String) == "live",
                                    resume: payload["resume"] as? Double ?? 0, token: payload["token"] as? Int ?? 0)
+            favorite = payload["favorite"] as? Bool ?? false
             // Cast receivers take HLS, so live channels go out in the form AVPlayer uses.
             castItem = CastItem(url: next.url(for: .avplayer), title: payload["title"] as? String ?? "Airwave", live: next.live)
             #if os(iOS)
@@ -119,6 +121,8 @@ final class AirwaveModel: NSObject, ObservableObject, WKScriptMessageHandler, WK
         default: reply(id, error: "Unsupported native action.")
         }
     }
+    // Favorites live in the web interface's storage; the overlay flips its copy and reports the new state.
+    func toggleFavorite() { favorite.toggle(); emit("favorite", favorite) }
     private func reply(_ id: String, result: Any = NSNull(), error: String? = nil) {
         guard let data = try? JSONSerialization.data(withJSONObject: [id, result, error as Any? ?? NSNull()], options: [.fragmentsAllowed]), let args = String(data: data, encoding: .utf8) else { return }
         webView?.evaluateJavaScript("window.__airwaveNativeReply.apply(null,\(args))", completionHandler: nil)
@@ -840,6 +844,8 @@ struct ThinTrack: View {
 // keep AVPlayerViewController's controls.
 struct AirwavePlayerOverlay: View {
     @ObservedObject var state: PlaybackState
+    let favorite: Bool
+    let toggleFavorite: () -> Void
     let close: () -> Void
     @State private var appeared = false
     @State private var active = true
@@ -869,13 +875,18 @@ struct AirwavePlayerOverlay: View {
                     .frame(maxHeight: .infinity, alignment: .bottom).padding(.bottom, 24)
             }
             HStack(spacing: 12) {
-                BackButton(action: close)
+                OverlayButton(symbol: "chevron.left", label: "Back to Airwave", action: close)
+                    #if os(macOS)
+                    .keyboardShortcut(.cancelAction)
+                    #endif
                 #if os(iOS)
                 AirwaveCastButton().frame(width: 44, height: 44)
                 #endif
+                Spacer()
+                OverlayButton(symbol: favorite ? "heart.fill" : "heart", label: favorite ? "Remove from favorites" : "Add to favorites", action: toggleFavorite)
             }
-                .opacity(shown ? 1 : 0).offset(x: shown || reduceMotion ? 0 : -10).allowsHitTesting(shown)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(20)
+                .opacity(shown ? 1 : 0).offset(y: shown || reduceMotion ? 0 : -8).allowsHitTesting(shown)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).padding(20)
         }
         .animation(.easeOut(duration: 0.22), value: shown)
         .onAppear { appeared = true; wake() }
@@ -913,8 +924,8 @@ struct AirwavePlayerOverlay: View {
     }
 }
 
-struct BackButton: View {
-    let action: () -> Void
+struct OverlayButton: View {
+    let symbol: String, label: String, action: () -> Void
     @State private var hovering = false
     #if os(macOS)
     private let size: CGFloat = 36
@@ -923,12 +934,12 @@ struct BackButton: View {
     #endif
     var body: some View {
         Button(action: action) {
-            Image(systemName: "chevron.left").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+            Image(systemName: symbol).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
                 .frame(width: size, height: size).background(Circle().fill(Color.black.opacity(hovering ? 0.82 : 0.62))).contentShape(Circle())
         }
-        .buttonStyle(PressStyle()).accessibilityLabel("Back to Airwave")
+        .buttonStyle(PressStyle()).accessibilityLabel(label)
         #if os(macOS)
-        .help("Back to Airwave").keyboardShortcut(.cancelAction)
+        .help(label)
         .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hovering = h } }
         #endif
     }
