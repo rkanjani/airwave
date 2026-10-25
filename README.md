@@ -1,10 +1,10 @@
 # Airwave 0.2
 
-Independent media player with an original interface and artwork, and no payment gates. One HTML/CSS/JavaScript interface serves web, Samsung TV, iOS and macOS; playback and private storage use platform adapters.
+Independent media player with an original interface and artwork, and no payment gates. One HTML/CSS/JavaScript interface serves web, Samsung TV, iOS, macOS and Android (phones, tablets, Android TV); playback and private storage use platform adapters. Roku gets a BrightScript/SceneGraph channel built on the same catalog contract.
 
 ## Verified status
 
-Development version 0.2.0. Browser HLS playback and native macOS playback have been exercised with a private user-provided catalog. The iOS simulator and macOS targets compile. This is not a store release or certification of every stream or codec.
+Development version 0.2.0. Browser HLS playback and native macOS playback have been exercised with a private user-provided catalog. The iOS simulator and macOS targets compile. Android played public and simulated streams on Android TV and phone emulators; the Roku channel builds and runs in a BrightScript simulator. This is not a store release or certification of every stream or codec.
 
 Samsung target is Tizen 6.0+. Physical iOS and Samsung TV playback remain unverified. No playlists, provider accounts, credentials or channel subscriptions are included.
 
@@ -21,6 +21,8 @@ Samsung target is Tizen 6.0+. Physical iOS and Samsung TV playback remain unveri
 | `server/` + `scripts/serve.cjs` | Local web relay: provider URLs stay server-side, same-origin opaque media URLs, HLS rewriting and Range support; opt-in token-protected LAN cast listener |
 | `platforms/apple/Airwave.swift` | iOS/macOS SwiftUI shell, bundled WKWebView, AVPlayer and mpv playback engines with automatic selection and fallback, compact native controls, document picker, AES-GCM catalog storage with Keychain key |
 | `app/config.xml` | Samsung TV packaging and privileges |
+| `platforms/android/` | Android phone/tablet/TV shell: bundled WebView, origin-restricted bridge, Media3 ExoPlayer playback with fallback, Keystore-sealed catalog, native artwork cache, TV banner and D-pad support |
+| `platforms/roku/` | Roku SceneGraph channel: BrightScript port of the playlist parser and catalog contract, Video node playback, registry-stored preferences |
 
 Apple apps bundle the interface and connect directly to the provider; they do not depend on the local web server. Native catalog credentials never enter the web view. Tile artwork comes from the catalog's logos and posters (resolved natively on Apple, through the relay on the web) and from XMLTV programme icons; titles without artwork show their name on a flat tint. Live channel tiles on screen also show a still of what the channel is playing, grabbed one channel at a time and never during playback: through the relay when `ffmpeg` is installed (or `AIRWAVE_FFMPEG` points at it; `AIRWAVE_PREVIEWS=0` turns stills off), and natively with mpv on Apple. The logo stays until a still arrives or when a grab fails. The web relay keeps provider credentials out of the browser library payload. Web and Apple catalogs are private, device-local copies; there is no cloud synchronization.
 
@@ -34,7 +36,7 @@ npm run check
 npm run release
 ```
 
-The check runs 37 active tests plus one pending Samsung version-parity expectation. The release command creates a static runtime archive in `dist/`, with no private catalog or Node relay.
+The check runs 74 active tests (including Roku parity under `brs-node` and BrighterScript validation) plus one pending Samsung version-parity expectation. The release command creates a static runtime archive in `dist/`, with no private catalog or Node relay.
 
 ## Run the web app
 
@@ -94,6 +96,34 @@ xcodebuild -project platforms/apple/Airwave.xcodeproj -scheme Airwave-iOS -confi
 In the native app, Settings → Choose library file imports the private JSON catalog. It is encrypted into Application Support/Airwave/library.encrypted; the AES key is in Keychain. Move a private catalog to an iPhone only through a transfer method you trust, then use its file picker. This is a development app, not an App Store release. Store assets, privacy declarations, signing/provisioning, device testing, and distribution are separate release work.
 
 HTTP IPTV support currently uses an ATS exception in the Apple plist. A release must document this user-provided media use case or narrow the exception as provider support allows. No certificate validation bypass is implemented.
+
+## Android phones, tablets and Android TV
+
+Requires JDK 17+, the Android SDK (platform 37) and Node on `PATH` (Gradle stages `app/` through the same allowlist as the web release):
+
+```sh
+cd platforms/android
+JAVA_HOME=/path/to/jdk-17 ANDROID_HOME="$HOME/Library/Android/sdk" ./gradlew assembleDebug testDebugUnitTest
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+One debug APK runs on phones, tablets and Android TV (it appears in the TV launcher with a banner). On a phone or tablet, Settings → Choose library file imports the private JSON catalog into Keystore-sealed app storage. Android TV has no file picker, so add an M3U playlist by URL there. Playback uses Media3 ExoPlayer: HLS, MP4/MOV, raw `.ts` live channels, MKV and AVI, subject to the device's decoders. Release signing and Play Store submission are separate, owner-approved work; there is no Android casting or picture-in-picture yet.
+
+## Roku
+
+Roku runs its own SceneGraph channel in `platforms/roku/`, built on the same playlist parsing, IDs and catalog contract as the shared interface (tests compare the two). Build the sideload zip:
+
+```sh
+npm run roku
+```
+
+On the Roku, turn on developer mode (Home ×3, Up ×2, Right, Left, Right, Left, Right), set a password, then upload `dist/airwave-roku-0.2.0.zip` from `http://<roku-ip>` (Development Application Installer). Or install it from this computer:
+
+```sh
+ROKU_HOST=192.168.1.20 ROKU_DEV_PASSWORD='your-dev-password' npm run roku -- --install
+```
+
+In the channel, Settings → playlist address takes an M3U or Airwave library JSON URL. The address is stored on the Roku unencrypted, and the library downloads again at each launch. Playback covers HLS, MP4/MOV/M4V, MKV and DASH; live `.ts` channels are played as their `.m3u8` form; AVI is not supported. There is no TV guide on Roku yet. Real-device playback is unverified.
 
 ## Samsung Frame TV
 

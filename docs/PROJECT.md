@@ -15,9 +15,13 @@ No public hosted service or store distribution has been established.
 These status claims come from the initial development scope and the current source,
 not from a published App Store or Samsung listing.
 
-Supported development targets are browser, Samsung Tizen 6.0+, macOS 13+ and iOS 16+.
+Supported development targets are browser, Samsung Tizen 6.0+, macOS 13+, iOS 16+,
+Android 7.0+ (phones, tablets and Android TV, one APK) and Roku (FHD SceneGraph channel).
+Every feature is built for all of these targets in the same change (see `AGENTS.md`); what a
+platform cannot do is listed under "Platform gaps" below.
 Browser and macOS real playback were observed in initial development.
-iOS simulator builds succeeded; physical iOS and Samsung playback remain unverified.
+iOS simulator builds succeeded; Android played public and simulated streams on the Android TV
+and phone emulators. Physical iOS, Android, Roku and Samsung playback remain unverified.
 Successful import is not proof that every stream/container/codec will play.
 
 ## Complete top-level map
@@ -36,7 +40,7 @@ Successful import is not proof that every stream/container/codec will play.
 | `docs/` | Docs | This product, architecture, history and debt map |
 | `package.json` | Config | Commands, Node engine, license and exact dependencies; private prevents accidental npm publication |
 | `package-lock.json` | Generated/committed | Reproducible dependency resolution; update through npm |
-| `platforms/` | First-party/config | Swift Apple shell, plist, app icon asset catalog and hand-authored Xcode project/shared schemes |
+| `platforms/` | First-party/config | `apple/`: Swift shell, plist, icon catalog, Xcode project. `android/`: Gradle project, Kotlin WebView shell, Media3 playback, icons/banner. `roku/`: BrightScript/SceneGraph channel |
 | `scripts/` | First-party tooling | Local server, unified checks, runtime allowlist, web release and Tizen packager |
 | `server/` | First-party | Private library registry, HLS rewriting, safe upstream requests and the tile-artwork cache |
 | `tests/` | Synthetic tests | Node tests for parsing, filtering, playback, native bridge, relay and release staging |
@@ -64,6 +68,12 @@ Apple -> Airwave.swift -> bundled app/index.html -> webkit airwave messages
 iOS   -> Google Cast iOS SDK -> Cast device -> user-selected provider
 
 Samsung -> app/config.xml -> app/index.html -> player.js -> Samsung AVPlay
+
+Android -> MainActivity -> https://appassets.androidplatform.net/app/index.html (bundled app/)
+        -> AirwaveAndroid web message listener -> Keystore-sealed catalog -> Media3 ExoPlayer
+        -> user-selected provider
+Roku    -> platforms/roku channel -> LoadTask (roUrlTransfer) -> core.brs parse -> Video node
+        -> user-selected provider
 ```
 
 `app/styles.css` switches between a labelled TV/desktop sidebar and, at 900px and below, a
@@ -90,7 +100,27 @@ In Chrome, `app/cast.js` adds a Cast button once a device is found; while castin
 controls drive the receiver and disconnecting resumes locally. iOS uses the Cast SDK's own
 button and expanded controls from the native player. macOS and Samsung do not cast.
 
-`AirwavePlatform` loads private catalogs through the Apple bridge or local web endpoint.
+Android bundles the same `app/` files (staged at build time through `scripts/runtime-files.cjs`) and
+serves them from `https://appassets.androidplatform.net/app/` with `WebViewAssetLoader`, so the page has
+a secure origin and no file access. Media3 ExoPlayer plays each title in a native view over the web view,
+like the Apple native cover: HLS by `.m3u8`, everything else as progressive media through ExoPlayer's
+own extractors (MP4/MOV, raw MPEG-TS including unbounded live channels, MKV, WebM, AVI). A title that
+fails before its first frame retries once in the other form, a live `.ts` URL as its `.m3u8` twin, and
+decoders that refuse a stream fall back to the next decoder. The title bar (Back, favorite) shows with
+the Media3 controls; the remote's first D-pad press shows them, and Back closes the player. Playback stops
+when the app leaves the screen. The TV launcher shows a banner; Back on the home screen offers Leave, as on
+Samsung. Android does not cast or offer picture-in-picture.
+
+Roku runs `platforms/roku/`, a SceneGraph channel that shares contracts rather than code: `source/core.brs`
+ports `parseM3U`, `httpUrl`, `hash`, the catalog v2 validation, search filtering and the ASCII rules of
+`tidyName`/`tidyGroups`, and `tests/roku.test.cjs` proves parity by running it in the `brs-node` simulator
+against `app/core.js`. Screens follow the shared design (true black, stepped surfaces, accent for live data,
+white focus): a rail, Home rows, Live TV and Movies with group lists and grids, Favorites, Search with an
+on-screen keyboard, and Settings. A Task node downloads the library (M3U or catalog v2 JSON, 8 MB, 45 s) from an
+address the user types and parses it off the render thread. The Video node plays HLS, MP4/MOV/M4V, MKV and DASH;
+live `.ts` channels are rewritten to `.m3u8`; AVI is refused. Movies resume and save progress every 15 s.
+
+`AirwavePlatform` loads private catalogs through the Apple or Android bridge or the local web endpoint.
 Static hosting with no `/api/library` endpoint falls back to ordinary demo/M3U use.
 It remains subject to browser CORS and mixed-content rules; the tested private-source
 Chromium path used the local relay.
@@ -139,6 +169,17 @@ CI runs on GitHub Actions. There is no analytics, cloud-sync or Airwave account 
   retried after a day, folder trimmed past 200 MB). Reset clears that folder. The
   underlying catalog is AES-GCM encrypted in Application Support/Airwave; the key is
   stored in Keychain. This storage is separate from the browser view's preferences.
+- Android keeps the same snapshot contract: `airwave-native://<id>` media and
+  `https://appassets.androidplatform.net/art/logo/<id>` artwork (WebView cannot load images from a
+  custom scheme, so artwork is a same-origin path answered natively). The catalog file
+  (`no_backup/library.encrypted`, excluded from backups) is AES-GCM sealed with a random data key that
+  is itself sealed by a non-exportable Android Keystore key. Artwork is downsampled to 512 px in the app
+  cache with the Apple cache's limits. Android TV images have no document picker (a stub activity closes
+  at once); the app detects it and says to add a playlist by URL.
+- Roku keeps the library address, favorites (6 KB cap), progress (5 KB cap, oldest dropped), favorite seed and
+  Tidy names in registry section `airwave`, unencrypted; Settings says so and shows only the host. The library is
+  not cached and downloads again at each launch. IDs use the same FNV-1a hash as `app/core.js`, so favorites and
+  progress follow the same items.
 - Plain M3U import is limited to 5 MB/10,000 entries. Its optional remembered library
   uses local-storage version 1 and is unencrypted. XMLTV imports are limited to 10 MB
   and kept only for the session. Favorites/history are separate local-storage keys.
@@ -158,7 +199,9 @@ CI runs on GitHub Actions. There is no analytics, cloud-sync or Airwave account 
   channel named for both teams, then a channel whose displayed name is the broadcaster (whole name
   over prefix; services ending in "+" never match). With no match a dialog says what was searched
   (`tests/sports.test.cjs`). Matching is heuristic and has only been exercised with synthetic playlists.
-- Bridge request IDs correlate responses; playback tokens reject stale events. Default
+- Bridge request IDs correlate responses; playback tokens reject stale events. Android receives the same
+  `{id, action, payload}` as a JSON string through an `AirwaveAndroid` web message listener that accepts
+  only the main frame on the bundle origin, and adds an `exit` action for the Leave dialog. Default
   native timeout is 30 seconds, document picking 5 minutes (`tests/platform.test.cjs`).
 - Casting a relay item mints one cast token through the cookie-guarded `POST /api/cast`
   (`/api/cast/end` revokes it). The token is 48 hex characters, rotates on every cast and expires
@@ -197,12 +240,22 @@ no earlier Git history, tag, merged PR or removal record to reconstruct here.
 | 2026-10-25 | macOS and iOS apps use the wave bands mark as their app icon | `8dea7f8` |
 | 2026-10-25 | Home shows scores for sports leagues followed in Settings; choosing a game plays the matching channel | `53310bf` |
 | 2026-10-25 | Live tiles show a still of the channel, grabbed serially through the relay (ffmpeg) and natively on Apple (mpv), with the logo as fallback | `843add1` |
+| 2026-10-25 | Added the Android app (phone, tablet, TV; Media3 playback) and the Roku channel (BrightScript port with parity tests); features now ship on every target | `571d763`, `f95f442` |
 
 The initial import is evidence of the current implementation, not a claim that all its
 features were originally written in that commit. Pre-import observations are recorded
 in `VERIFICATION.md`; their private test data and screenshots are deliberately absent.
 
 ## Decisions still shaping the code
+
+- Every feature ships on every target (web, Samsung, macOS, iOS, Android, Roku) in the same change; a target
+  that cannot support something gets an entry under "Platform gaps" instead of silently missing it.
+- Android follows the Apple pattern (bundled `app/` in a WebView, native bridge, native catalog and playback)
+  so one interface keeps serving every screen that can run it. ExoPlayer covers what the Apple app needs two
+  engines for: HLS, raw live MPEG-TS, MKV and AVI. The bridge uses an origin-restricted web message listener rather
+  than `addJavascriptInterface`, which would expose native code to every frame.
+- Roku cannot run HTML, so it is a separate BrightScript channel that shares contracts and is held to them by
+  parity tests, not a second implementation free to drift.
 
 - One shared UI with explicit platform playback/storage adapters follows the requested
   cross-platform scope (initial implementation: `ffeb7ff`, `app/platform.js`, Apple shell).
@@ -273,8 +326,27 @@ catalogs, device exports, user-specific verification details or credential-beari
    iOS simulator's Cast prompt. Real receiver playback, HTTP sources on the HTTPS receiver page,
    provider CORS and the iOS local-network prompt on hardware are unverified. A custom receiver
    or an iOS-side relay would be needed for HLS providers without CORS when casting from iOS.
-10. The iOS target links the Google Cast SDK (exact 4.8.6). Its Bluetooth/local-network usage and
+10. Android and Roku have been exercised only on emulators and the `brs-node` simulator. Physical Android TV
+   remotes, real device decoders, a real Roku (Video node formats, remote feel, registry limits, parse time for
+   large playlists: about 11 s for 10,000 entries in the simulator) and Roku sideload/install remain unverified.
+11. The iOS target links the Google Cast SDK (exact 4.8.6). Its Bluetooth/local-network usage and
    App Store privacy declarations need review before distribution.
+
+## Platform gaps
+
+What a target cannot do yet, by design or for now. Close these, or add to them, as features change.
+
+| Feature | Gap |
+| --- | --- |
+| Private catalog import | Android TV has no file picker; Roku has no file access. Both take a playlist or catalog address instead; Roku keeps that address unencrypted. Samsung and static web use M3U only. |
+| XMLTV guide | Not on Roku (no guide grid or now/next). |
+| Casting | Chrome and iOS only; not macOS, Samsung, Android or Roku. |
+| MKV/AVI and raw `.ts` | Apple (mpv) and Android (ExoPlayer) play them; browser and Samsung do not; Roku plays MKV, rewrites live `.ts` to `.m3u8`, and refuses AVI. |
+| Tidy names | Roku tidies ASCII names only; styled Unicode letters keep their playlist form. |
+| Large libraries | Roku grids show at most 300 tiles and search 120, with a note. |
+| Live tile stills | Web relay and Apple only. Android, Samsung and Roku tiles show the catalog logo or tint; Android's snapshot has no `preview` field yet. |
+| Sports scores, Continue watching | In the shared interface (web, Samsung, Apple, Android). Not yet in the Roku channel, whose Home has Favorites, Live TV and Movies rows. |
+| Picture-in-picture | None on any target. |
 
 ## Release ownership
 
@@ -284,6 +356,9 @@ plus MIT/third-party notices. It runs the same check first and excludes server c
 Apple bundles the entire `app/` directory; the check enforces that this directory contains
 exactly the allowlisted files, including vendor assets.
 `npm run package` stages that allowlist for Tizen and requires a certificate profile/CLI.
+`npm run roku` checks the repo and writes `dist/airwave-roku-0.2.0.zip` from `rokuFiles` plus notices, for
+developer-mode sideloading. Android builds a debug APK with Gradle; release signing, AAB and Play listing are
+separate, owner-approved work.
 Apple builds use the two Xcode schemes; signing identifiers, assets and store declarations
 must be prepared and approved for a particular release. No automated publishing exists.
 Branch protection and required-check settings are owner choices, not configured by these files.

@@ -21,3 +21,8 @@ test('Apple and npm marketing versions agree', () => {
   const apple = plist.match(/<key>CFBundleShortVersionString<\/key>\s*<string>([^<]+)<\/string>/)[1];
   assert.equal(apple, require('../package.json').version);
 });
+
+test('Android and npm marketing versions agree', () => {
+  const gradle = fs.readFileSync(path.join(__dirname, '../platforms/android/app/build.gradle.kts'), 'utf8');
+  assert.equal(gradle.match(/versionName = "([^"]+)"/)[1], require('../package.json').version);
+});

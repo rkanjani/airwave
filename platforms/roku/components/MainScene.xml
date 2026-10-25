@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Airwave on Roku: the rail, Home, Live TV, Movies, Favorites, Search and Settings, and the player above them.
+     Colours follow app/styles.css: true-black ground, #111 surfaces, #1c1c1c raised, muted #b4b4b4, accent #e4ae78. -->
+<component name="MainScene" extends="Scene">
+    <script type="text/brightscript" uri="pkg:/source/core.brs"/>
+    <script type="text/brightscript" uri="pkg:/components/Fonts.brs"/>
+    <script type="text/brightscript" uri="pkg:/components/MainScene.brs"/>
+    <children>
+        <Rectangle id="ground" width="1920" height="1080" color="0x000000FF"/>
+
+        <Group id="rail">
+            <Rectangle translation="[329,0]" width="1" height="1080" color="0x1A1A1AFF"/>
+            <Poster translation="[40,46]" width="44" height="44" uri="pkg:/images/brand.png"/>
+            <Label id="brandName" translation="[100,48]" text="Airwave" color="0xFFFFFFFF"/>
+            <Label id="libraryName" translation="[100,94]" width="210" color="0x949494FF" text="No library"/>
+            <LabelList id="nav" translation="[40,160]" itemSize="[250,60]" itemSpacing="[0,4]" numRows="6" vertFocusAnimationStyle="floatingFocus" color="0xB4B4B4FF" focusedColor="0x000000FF" focusBitmapUri="pkg:/images/pill.9.png" focusFootprintBitmapUri="pkg:/images/pill.9.png" focusFootprintBlendColor="0x1C1C1CFF" textHorizAlign="left"/>
+        </Group>
+
+        <Group id="header" translation="[378,48]">
+            <Label id="pageTitle" text="Home" color="0xFFFFFFFF"/>
+            <Label id="pageNote" translation="[0,62]" width="1100" color="0xB4B4B4FF"/>
+            <Label id="clock" translation="[1194,8]" width="300" horizAlign="right" color="0xB4B4B4FF"/>
+        </Group>
+
+        <Group id="homePage">
+            <RowList id="homeRows" translation="[378,160]" itemSize="[1542,320]" numRows="3" itemComponentName="TileItem" drawFocusFeedback="false" showRowLabel="[true]" rowLabelColor="0xFFFFFFFF" rowLabelOffset="[[0,14]]" rowItemSpacing="[[24,0]]" rowSpacings="[24]" rowFocusAnimationStyle="floatingFocus" vertFocusAnimationStyle="fixedFocus"/>
+            <Group id="emptyPanel" visible="false" translation="[378,170]">
+                <Poster uri="pkg:/images/tile.9.png" blendColor="0x111111FF" width="1140" height="330"/>
+                <Label id="emptyTitle" translation="[48,44]" width="1040" color="0xFFFFFFFF"/>
+                <Label id="emptyText" translation="[48,100]" width="1040" wrap="true" maxLines="3" lineSpacing="6" color="0xB4B4B4FF"/>
+                <LabelList id="emptyAction" translation="[48,222]" itemSize="[300,60]" numRows="1" color="0xFFFFFFFF" focusedColor="0x000000FF" focusBitmapUri="pkg:/images/pill.9.png" focusFootprintBitmapUri="pkg:/images/pill.9.png" focusFootprintBlendColor="0x444444FF" textHorizAlign="center"/>
+            </Group>
+        </Group>
+
+        <Group id="browsePage" visible="false">
+            <LabelList id="groups" translation="[378,160]" itemSize="[330,56]" itemSpacing="[0,4]" numRows="14" vertFocusAnimationStyle="floatingFocus" color="0xB4B4B4FF" focusedColor="0x000000FF" focusBitmapUri="pkg:/images/pill.9.png" focusFootprintBitmapUri="pkg:/images/pill.9.png" focusFootprintBlendColor="0x1C1C1CFF" textHorizAlign="left"/>
+            <MarkupGrid id="grid" translation="[756,160]" itemComponentName="TileItem" numColumns="3" numRows="3" itemSize="[327,259]" itemSpacing="[24,32]" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus"/>
+            <Label id="browseEmpty" translation="[756,170]" width="1100" wrap="true" color="0xB4B4B4FF" visible="false"/>
+        </Group>
+
+        <Group id="searchPage" visible="false">
+            <DynamicMiniKeyboard id="keyboard" translation="[378,160]"/>
+            <Label id="searchNote" translation="[378,890]" width="580" wrap="true" color="0xB4B4B4FF" text="Search names and groups."/>
+            <MarkupGrid id="results" translation="[1000,160]" itemComponentName="TileItem" numColumns="3" numRows="3" itemSize="[272,229]" itemSpacing="[24,32]" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus"/>
+        </Group>
+
+        <Group id="settingsPage" visible="false">
+            <Poster translation="[378,160]" uri="pkg:/images/tile.9.png" blendColor="0x111111FF" width="1140" height="270"/>
+            <Label id="playlistHeading" translation="[426,196]" text="Playlist" color="0xFFFFFFFF"/>
+            <Label id="sourceText" translation="[426,246]" width="1040" wrap="true" maxLines="2" lineSpacing="6" color="0xB4B4B4FF"/>
+            <Label id="storageNote" translation="[426,330]" width="1040" wrap="true" maxLines="3" lineSpacing="6" color="0x949494FF" text="Airwave loads this address each time it starts. The address is saved on this Roku without encryption, so do not use a playlist link you would not want stored on this device."/>
+            <LabelList id="actions" translation="[378,474]" itemSize="[420,60]" itemSpacing="[0,8]" numRows="4" color="0xFFFFFFFF" focusedColor="0x000000FF" focusBitmapUri="pkg:/images/pill.9.png" textHorizAlign="left"/>
+            <Label id="tidyText" translation="[900,480]" width="618" wrap="true" maxLines="5" lineSpacing="6" color="0x949494FF" text="Tidy names cleans up channel and group names from your playlist: region prefixes, divider symbols and all capitals. Quality tags such as 4K, HD and SD become badges."/>
+        </Group>
+
+        <PlayerView id="player" visible="false"/>
+
+        <Group id="toast" visible="false" translation="[660,940]">
+            <Poster uri="pkg:/images/pill.9.png" blendColor="0x1C1C1CFF" width="600" height="64"/>
+            <Label id="toastText" width="600" height="64" horizAlign="center" vertAlign="center" color="0xFFFFFFFF"/>
+        </Group>
+
+        <Timer id="toastTimer" duration="2.5"/>
+        <Timer id="clockTimer" duration="30" repeat="true"/>
+        <Timer id="groupTimer" duration="0.3"/>
+        <Timer id="searchTimer" duration="0.4"/>
+    </children>
+</component>

@@ -26,3 +26,10 @@ private/
 .claude/settings.local.json
 .claude/worktrees/
 .codex/
+
+.gradle/
+.kotlin/
+local.properties
+*.apk
+*.aab
+*.pkg

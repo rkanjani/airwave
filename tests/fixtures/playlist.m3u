@@ -1,0 +1,44 @@
+﻿#EXTM3U x-tvg-url="https://guide.example/epg.xml"
+#EXTINF:-1 tvg-id="news.us" tvg-logo="https://img.example/news.png" group-title="US | News",US: NEWS CHANNEL HD
+http://user:secret@live.example:8080/live/user/secret/1001.ts
+#EXTINF:-1 tvg-id="kids" group-title="Kids, Family" tvg-logo="/logos/kids.png",[UK] Cartoon Planet FHD
+/live/user/secret/1002.ts
+#EXTINF:-1 group-title="Sports",Match Day, Live
+HTTP://LIVE.EXAMPLE:80/live/a/../user/./secret/1003.m3u8?token=abc def
+#EXTVLCOPT:http-user-agent=Synthetic
+#EXTINF:-1 group-title="Sports",Duplicate Of First
+http://user:secret@live.example:8080/live/user/secret/1001.ts
+#EXTINF:7200 group-title="Drama",The Long Film (2019)
+https://vod.example/movies/long-film.mkv
+#EXTINF:-1 group-title="Cinema Club",Classic Feature 4K HDR
+https://vod.example:443/title/classic
+#EXTINF:-1 tvg-logo="rtmp://bad.example/x.png" group-title="",Plain Name
+https://vod.example/clips/plain.MP4?quality=hi
+#EXTINF:-1 group-title="Documentary VOD",Nature 720p 60 fps
+movies/nature.mov
+https://stream.example/no-extinf
+#EXTINF:-1,
+https://stream.example/empty-name.m3u8
+#EXTINF:-1 group-title="Music"
+https://stream.example/no-comma.m3u8
+ftp://files.example/not-http.ts
+#EXTINF:-1 group-title="Ignored",Pending dropped by invalid URL
+rtmp://stream.example/live
+https://stream.example/after-invalid.m3u8
+#EXTINF:-1 group-title="Sports",ESPN NEWS RAW
+https://stream.example/espn-news.ts?x=1
+#EXTINF:-1 group-title="Latino",Canal Español HD
+https://stream.example/canal-español.m3u8
+#EXTINF:-1 group-title="World",Café ★ Ünïcode ✓
+https://stream.example/ü/日本.m3u8#frag ment
+#EXTINF:-1 group-title="Movies",AVI Title
+https://vod.example/old/title.avi
+  https://stream.example/indented.m3u8  
+#EXTINF:-1 group-title="Live",Backslash Path
+https://stream.example\live\slash.m3u8
+#EXTINF:-1 group-title="Live",Proto Relative
+//cdn.example/live/proto.m3u8
+#EXTINF:-1 group-title="Live",Query Only
+?channel=9
+#EXTINF:-1 group-title="Live",CRLF line
+https://stream.example/crlf.m3u8

@@ -36,8 +36,8 @@ assert.equal(steps.find(x => x.uses?.startsWith('actions/checkout@')).with['pers
 const tracked = spawnSync('git', ['ls-files', '-z'], { encoding: 'utf8' });
 if (tracked.status !== 0) throw new Error('Run checks from a Git checkout');
 for (const file of tracked.stdout.split('\0').filter(Boolean)) {
-  assert.ok(!/(^|\/)(node_modules|build|dist|private|work|xcuserdata)\/|\.(?:p12|pem|key|jks|keystore|mobileprovision|encrypted|log|wgt|ipa)$|(^|\/)\.env(?:\.|$)|\.claude\/(?:settings\.local\.json|worktrees\/)/i.test(file), 'Private/build file tracked: ' + file);
-  if (/\.(?:md|json|c?js|swift|xml|plist|yml|pbxproj)$/.test(file) && !file.includes('/vendor/')) {
+  assert.ok(!/(^|\/)(node_modules|build|dist|private|work|xcuserdata|\.gradle|\.kotlin)\/|\.(?:p12|pem|key|jks|keystore|mobileprovision|encrypted|log|wgt|ipa|apk|aab|pkg|zip)$|(^|\/)local\.properties$|(^|\/)\.env(?:\.|$)|\.claude\/(?:settings\.local\.json|worktrees\/)/i.test(file), 'Private/build file tracked: ' + file);
+  if (/\.(?:md|json|c?js|swift|kt|kts|properties|brs|m3u|xml|plist|yml|pbxproj)$|(^|\/)manifest$/.test(file) && !file.includes('/vendor/')) {
     const text = fs.readFileSync(file, 'utf8');
     assert.ok(!/\/Users\/[a-zA-Z][^/\s]*\//.test(text), 'Machine-specific home path in ' + file);
     assert.ok(!/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|gh[pousr]_[A-Za-z0-9]{30,}/.test(text), 'Possible credential in ' + file);
