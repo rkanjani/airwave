@@ -3,8 +3,8 @@
 ## Product and status
 
 Airwave 0.2.0 is a development-stage player for people bringing their own media playlists.
-It provides an artwork-led library, live channels, movie browsing, favorites, search,
-M3U import, XMLTV schedules and playback across a shared interface.
+It provides a library home, Live TV (a channel grid and an XMLTV guide), movie browsing,
+favorites, search, M3U import and playback across a shared interface.
 The implementation has an original interface and artwork.
 See `NOTICE.md` for media and dependency attribution.
 
@@ -59,7 +59,9 @@ Apple -> Airwave.swift -> bundled app/index.html -> webkit airwave messages
 Samsung -> app/config.xml -> app/index.html -> player.js -> Samsung AVPlay
 ```
 
-`app/styles.css` switches between a TV/desktop side rail and phone bottom navigation.
+`app/styles.css` switches between a labelled TV/desktop sidebar and, at 900px and below, a
+top bar plus five-tab bottom bar; screens of 1700px and wider scale the same layout for TV distance.
+The shared player shows a remote-scrubbable seek bar for movies and programme progress for live channels.
 The UI is shared; Apple video controls are native and Samsung remote keys are registered
 when the corresponding APIs exist. Browser playback uses native video or HLS.js.
 Callbacks are guarded by playback generation so abandoned streams cannot restart.
@@ -106,6 +108,7 @@ no earlier Git history, tag, merged PR or removal record to reconstruct here.
 | 2026-10-24 | Added MIT terms and ignores for private data, signing artifacts and per-machine state | `ef62c8e` |
 | 2026-10-24 | Added one local/CI check, native bridge characterization, a pending version-parity test and allowlisted packaging | `f07a459` |
 | 2026-10-24 | Added the operational agent guide and product/history map | `8d00680` |
+| 2026-10-24 | Redesigned the shared interface; merged Guide into Live TV; added movie seek/resume and live-programme player controls | `efef441` |
 
 The initial import is evidence of the current implementation, not a claim that all its
 features were originally written in that commit. Pre-import observations are recorded
@@ -129,7 +132,9 @@ in `VERIFICATION.md`; their private test data and screenshots are deliberately a
 
 ## Removed and abandoned
 
-No tracked files or shipped features have been removed in this repository's history.
+The interface redesign removed `app/assets/horizon.svg` (decorative placeholder artwork) and
+folded the separate Guide destination into Live TV as a Channels / Guide switch. No other
+tracked files or shipped features have been removed.
 The pre-import SwiftUI VideoPlayer approach was replaced with native view wrappers;
 no earlier source revision is present here. The public repository never included private
 catalogs, device exports, user-specific verification details or credential-bearing screenshots.

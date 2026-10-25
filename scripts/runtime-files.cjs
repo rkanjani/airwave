@@ -4,7 +4,7 @@ const root = path.resolve(__dirname, '..');
 // Explicit allowlist: private catalogs, test harnesses and machine files never ship.
 const files = [
   'index.html', 'styles.css', 'core.js', 'platform.js', 'player.js', 'app.js',
-  'config.xml', 'assets/icon.svg', 'assets/icon.png', 'assets/horizon.svg',
+  'config.xml', 'assets/icon.svg', 'assets/icon.png',
   'vendor/hls.min.js', 'vendor/HLS-LICENSE',
 ];
 function stageRuntime(destination) {

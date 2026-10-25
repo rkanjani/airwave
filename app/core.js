@@ -17,7 +17,7 @@
       var url=httpUrl(line,base);if(!url||seen.has(url)){pending=null;return;}seen.add(url);
       var p=pending||{name:'Channel '+(entries.length+1),group:'Unsorted',epgId:'',logo:'',duration:-1,attrs:{}};
       var movie=p.duration>0||/\.(mp4|mkv|mov|webm)(\?|$)/i.test(url)||/movie|film|vod/i.test(p.group);
-      entries.push({id:hash(url),url:url,name:p.name||'Untitled channel',group:p.group,epgId:p.epgId,logo:p.logo,kind:movie?'movie':'live',description:'From your '+p.group+' collection.',color:entries.length%6});pending=null;
+      entries.push({id:hash(url),url:url,name:p.name||'Untitled channel',group:p.group,epgId:p.epgId,logo:p.logo,kind:movie?'movie':'live',color:entries.length%6});pending=null;
     });
     if(!entries.length)throw new Error('No HTTP or HTTPS streams found in this playlist.');
     if(entries.length>10000)throw new Error('This library has over 10,000 entries. Import a smaller playlist.');
@@ -35,6 +35,6 @@
   function currentProgram(programs,id,now){return (programs[id]||[]).find(function(p){return p.start<=now&&p.end>now;})||null;}
   function progress(program,now){return program?Math.max(0,Math.min(100,(now-program.start)/(program.end-program.start)*100)):0;}
   function filter(items,query,group,kind){query=(query||'').trim().toLocaleLowerCase();return items.filter(function(x){return (!kind||x.kind===kind)&&(!group||group==='All'||x.group===group)&&(!query||(x.name+' '+x.group).toLocaleLowerCase().indexOf(query)>=0);});}
-  function clock(seconds){seconds=Math.max(0,Math.floor(seconds||0));return Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0');}
+  function clock(seconds){seconds=Math.max(0,Math.floor(seconds||0));var h=Math.floor(seconds/3600),m=Math.floor(seconds%3600/60),s=String(seconds%60).padStart(2,'0');return h?h+':'+String(m).padStart(2,'0')+':'+s:m+':'+s;}
   return {httpUrl:httpUrl,hash:hash,parseM3U:parseM3U,xmlTime:xmlTime,parseXMLTV:parseXMLTV,currentProgram:currentProgram,progress:progress,filter:filter,clock:clock};
 });
