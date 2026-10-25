@@ -9,6 +9,8 @@ Demo streams are external trailers, not bundled films:
 - **Big Buck Bunny**: © Blender Foundation, https://peach.blender.org/ ; Creative Commons Attribution 3.0, https://creativecommons.org/licenses/by/3.0/ . Trailer hosted at https://media.w3.org/2010/05/bunny/trailer.mp4 . Unmodified external playback.
 - **Sintel**: © Blender Foundation, https://www.sintel.org/ ; Creative Commons Attribution 3.0, https://creativecommons.org/licenses/by/3.0/ . Trailer hosted at https://media.w3.org/2010/05/sintel/trailer.mp4 . Unmodified external playback.
 
+The comparison stills in `docs/verification/` are crops of Big Buck Bunny (© Blender Foundation, Creative Commons Attribution 3.0), re-encoded at lower resolutions, overlaid with a fictional Airwave caption bar, and upscaled; they document picture quality and are not part of the app.
+
 The landscape illustration is decorative Airwave artwork, not a frame or poster from either film. Sample channel names are fictional navigation examples and do not claim broadcast carriage.
 
 Casting uses Google Cast SDKs, which are not included in the source: Chrome loads Google's Cast sender script from www.gstatic.com when the player first opens, and the iOS target resolves the Google Cast iOS SDK 4.8.6 (with gtm-session-fetcher) through Swift Package Manager from https://github.com/googlecast/google-cast-ios-sdk . The SDK binaries are distributed under Google's Cast SDK terms, https://developers.google.com/cast/docs/terms .
