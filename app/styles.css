@@ -48,6 +48,7 @@ main{margin-left:var(--sidebar);min-height:100vh;min-width:0}
 .channel .art.logo .art-img{top:18%;left:15%;width:70%;height:64%;object-fit:contain}
 .art-logo{position:absolute;z-index:1;left:.625rem;bottom:.625rem;display:flex;width:3.25rem;height:2.125rem;padding:.3125rem;border-radius:6px;background:rgba(0,0,0,.72);opacity:0;transition:opacity .3s}.art-logo.ready{opacity:1}.art-logo .art-img{position:static;object-fit:contain}
 .card.movie{flex-basis:10rem}.movie .art{height:15rem}.movie .art-name{-webkit-line-clamp:5}
+.art-progress{position:absolute;z-index:1;right:0;bottom:0;left:0;padding:1.5rem .625rem .625rem;background:linear-gradient(transparent,rgba(0,0,0,.7))}.art-progress .progress{height:4px;background:rgba(255,255,255,.28)}.card.resumed .art{padding-bottom:1.625rem}
 .card-info{display:block;padding:.625rem .125rem 0}.card-title{display:block;font-size:.875rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .card-sub{display:block;margin-top:.1875rem;color:var(--faint);font-size:.75rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.card-info .progress{margin-top:.5rem}
 /* Quality badges replace the tags Tidy names removes: the resolution is filled, stream tags are outlined. */
