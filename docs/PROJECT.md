@@ -62,8 +62,9 @@ Samsung -> app/config.xml -> app/index.html -> player.js -> Samsung AVPlay
 `app/styles.css` switches between a labelled TV/desktop sidebar and, at 900px and below, a
 top bar plus five-tab bottom bar; screens of 1700px and wider scale the same layout for TV distance.
 The shared player shows a remote-scrubbable seek bar for movies and programme progress for live channels.
-The UI is shared; Apple video controls are native and Samsung remote keys are registered
-when the corresponding APIs exist. Browser playback uses native video or HLS.js.
+The UI is shared. macOS playback draws a compact SwiftUI control bar (auto-hiding, with an AirPlay
+route picker) over AVPlayerView; iOS uses AVPlayerViewController controls; Samsung remote keys are registered
+when the corresponding APIs exist. Search results start playback directly. Browser playback uses native video or HLS.js.
 Callbacks are guarded by playback generation so abandoned streams cannot restart.
 
 `AirwavePlatform` loads private catalogs through the Apple bridge or local web endpoint.
@@ -122,7 +123,8 @@ in `VERIFICATION.md`; their private test data and screenshots are deliberately a
   those paths; ordinary M3U Remember is an explicit, documented exception.
 - The relay is loopback-only and single-user. Turning it into a public multi-user service
   is a new authentication/storage/security project, not a host-binding tweak.
-- Native Apple controls use AVPlayerView/AVPlayerViewController. Initial development
+- Native Apple playback uses AVPlayerView/AVPlayerViewController; macOS hides the system bar
+  (`controlsStyle = .none`) because it cannot drop its overflow button. Initial development
   replaced a failing SwiftUI VideoPlayer integration before the baseline import; this
   pre-import observation is documented in the private development session, not Git history.
 - Vendored HLS is intentionally committed to support offline native/TV bundles. The

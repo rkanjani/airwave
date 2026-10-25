@@ -89,7 +89,7 @@ This produces a signed widget in `dist/`. Source ZIPs are not installable widget
 
 - Library browsing, title/group search, favorites, movie progress with a resume choice, details, M3U and XMLTV import, remote/keyboard navigation.
 - Browser and Samsung playback share one control layer: movies get a seek bar the remote scrubs (left/right to choose, OK to jump, Back to cancel), skip 10 seconds and Start over; live channels show the current programme, what is next and a Guide shortcut.
-- Phone layout uses touch-sized controls and safe-area spacing. Apple native playback uses system video controls.
+- Phone layout uses touch-sized controls and safe-area spacing. macOS native playback uses a compact Airwave control bar; iOS uses system video controls.
 - Browser HLS.js is pinned to 1.7.3; Safari/native HLS and Samsung AVPlay are separate adapters. MKV/AVI and some codecs in the imported collection will not play on Apple/browser engines without remuxing/transcoding. That service is not implemented.
 - Series listings require episode resolution rather than direct playable stream URLs. Series/episode browsing is not implemented.
 - No guide schedules were extracted. Import matching XMLTV to populate the guide. No Xtream login/automatic catalog refresh UI, catch-up, DVR, multiview, DRM or cloud sync.
