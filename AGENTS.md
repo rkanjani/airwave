@@ -9,7 +9,7 @@ Read `docs/PROJECT.md` before changing platform boundaries, storage, packaging, 
 ## How it works
 
 1. `scripts/serve.cjs` serves `app/` on loopback; an optional `AIRWAVE_LIBRARY_PATH` loads a private catalog through `server/library.cjs`. `AIRWAVE_CAST=1` adds a token-protected LAN listener (`server/cast.cjs`) for Cast receivers.
-2. `app/index.html` loads HLS.js, then `platform.js`, `core.js`, `player.js`, and `app.js`. `AirwavePlatform.loadLibrary()` selects the native bridge, local relay or demo fallback.
+2. `app/index.html` loads HLS.js, then `platform.js`, `core.js`, `sports.js`, `player.js`, and `app.js`. `AirwavePlatform.loadLibrary()` selects the native bridge, local relay or demo fallback.
 3. `app/app.js` owns navigation, imports, favorites and progress. `app/player.js` selects Apple native playback, Samsung AVPlay or browser video/HLS.js. In Chrome, `app/cast.js` hands the title to a Cast device and the same controls drive it.
 4. `platforms/apple/Airwave.swift` bundles that same interface, owns the native catalog, and plays each title on one of two engines behind its `PlaybackEngine` protocol: AVPlayer (HLS, MP4/MOV/M4V, and anything while AirPlay is in use) or mpv from MPVKit (raw `.ts` live channels, MKV/AVI and other containers). A failed start, or a first mpv attempt with no frame by its deadline, retries once on the other engine.
 
@@ -17,6 +17,7 @@ Read `docs/PROJECT.md` before changing platform boundaries, storage, packaging, 
 
 - `app/app.js`, `app/styles.css`: shared screens, copy, touch/remote/keyboard navigation.
 - `app/core.js`: M3U/XMLTV parsing, display-name tidying, time calculations and filtering; tests in `tests/core.test.cjs`.
+- `app/sports.js`: the followed-league list, scoreboard parsing and game-to-channel matching for the Home scores strip; tests in `tests/sports.test.cjs`.
 - `app/platform.js`, `app/player.js`, `app/cast.js`: JavaScript adapter contracts; tests in `tests/platform.test.cjs`, `tests/player.test.cjs` and `tests/sender.test.cjs`.
 - `server/library.cjs`, `server/network.cjs`, `server/artwork.cjs`: opaque media registry, HLS rewriting, outbound request boundaries and the tile-artwork cache; tests in `tests/library.test.cjs`. `server/cast.cjs`: cast tokens and the LAN listener; tests in `tests/cast.test.cjs`.
 - `platforms/apple/`: two shared Xcode schemes, Swift shell, plist and the `AppIcon` asset catalog (rendered from `app/assets/icon.svg`: an inset tile for macOS, full-bleed for iOS). iOS-only casting stays in `#if os(iOS)` blocks; the Google Cast SDK is an exact-pinned Swift package on the iOS target only. MPVKit (exact 1.0.0, its LGPL `MPVKit` product, never `MPVKit-GPL`) is linked into both targets. Engine choice lives in `PlaybackPolicy`, fallback and timing in `AirwaveModel.begin`/`handle`, and the controls read `PlaybackState`, never an engine directly.
@@ -28,9 +29,10 @@ Read `docs/PROJECT.md` before changing platform boundaries, storage, packaging, 
 - Playback callbacks belong to their generation. Closing or switching invalidates old success, failure and time callbacks; cleanup releases the stream.
 - Private catalog JSON is version 2 with `name` and `items`. Each item has a stable `id`, `name`, HTTP(S) `url`, `kind` (`live` or `movie`), and optional grouping, logo, EPG and favorite fields. Keep the raw file outside Git and app bundles.
 - Web snapshots replace upstream URLs with `/api/media/` IDs; native snapshots use `airwave-native://` media IDs and `airwave-art://logo/<id>` artwork IDs. Provider credentials and image URLs stay outside JavaScript for these two paths. Normal M3U Remember remains explicit opt-in, unencrypted local storage.
-- `airwave.library` local-storage format is version 1. Favorites, history, favorite-seed and the Tidy names preference keys are separate; tidied names are display-only, so stored items and search keep playlist names. Preserve existing IDs and storage readability when evolving imports.
+- `airwave.library` local-storage format is version 1. Favorites, history, favorite-seed, the Tidy names preference and the followed sports leagues (`airwave.sportsLeagues`) keys are separate; tidied names are display-only, so stored items and search keep playlist names. Preserve existing IDs and storage readability when evolving imports.
 - Apple bridge messages are `{id, action, payload}`; replies resolve by ID and playback events by token, whichever engine plays. The native catalog is AES-GCM encrypted with a Keychain-held key. Engines receive provider URLs only from native code; the opt-in timing log (`-AirwavePlaybackTiming YES`) records engine, kind, container and seconds, never URLs.
 - The web relay is a local single-user process: loopback binding, Host/origin/session checks, registered upstream URLs and private-network rejection are part of its boundary. Public hosting requires a separate security design. The opt-in cast listener is the only LAN-facing path: one rotating, expiring token, its own Host check, registered media only, never upstream URLs.
+- Scores are fetched from ESPN's public scoreboard feed only while at least one league is followed and Home is open; the request carries no library or user data. Keep it that way.
 - Private provider data stays out of tests and CI. Use reserved `.example` hosts and synthetic credentials; validate real playback manually only when authorized.
 
 ## Commands
