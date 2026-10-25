@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "name": "Synthetic Library",
+  "items": [
+    {"id": "live-1", "name": "US: NEWS ONE HD", "url": "https://live.example/live/user/pass/1.ts", "kind": "live", "group": "US | News", "logo": "https://img.example/1.png", "epgId": "news.one", "favorite": true, "color": 2},
+    {"id": "live-2", "name": "Sports Two", "url": "http://live.example:8080/live/user/pass/2", "kind": "live", "color": "13"},
+    {"id": "movie-1", "name": "A Movie", "url": "https://vod.example/movie/1.mp4", "kind": "movie", "group": "Movies", "logo": "ftp://img.example/bad.png", "color": -2.5},
+    {"id": "movie-2", "name": "Another Movie", "url": "https://vod.example/movie/2.mkv", "kind": "movie", "favorite": "yes"},
+    {"id": "live-1", "name": "Duplicate ID", "url": "https://live.example/dup.m3u8", "kind": "live"},
+    {"id": "bad-kind", "name": "Series", "url": "https://vod.example/s.mp4", "kind": "series"},
+    {"id": "bad-url", "name": "No scheme", "url": "rtmp://live.example/x", "kind": "live"},
+    {"id": 42, "name": "Numeric ID", "url": "https://live.example/42.m3u8", "kind": "live"},
+    {"id": "no-name", "url": "https://live.example/n.m3u8", "kind": "live"},
+    "not an object",
+    {"id": "", "name": "Empty ID", "url": "https://live.example/e.m3u8", "kind": "live"}
+  ]
+}

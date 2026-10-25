@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A card: flat tinted tile with the name set in type, the catalog logo over it when one loads, then title and group. -->
+<component name="TileItem" extends="Group">
+    <interface>
+        <field id="itemContent" type="node" onChange="onContent"/>
+        <field id="width" type="float" onChange="onSize"/>
+        <field id="height" type="float" onChange="onSize"/>
+        <field id="focusPercent" type="float" onChange="onFocus"/>
+        <field id="rowListHasFocus" type="boolean" onChange="onFocus"/>
+        <field id="gridHasFocus" type="boolean" onChange="onFocus"/>
+        <field id="itemHasFocus" type="boolean" onChange="onFocus"/>
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/Fonts.brs"/>
+    <script type="text/brightscript" uri="pkg:/components/TileItem.brs"/>
+    <children>
+        <Poster id="ring" uri="pkg:/images/tile.9.png" blendColor="0xFFFFFFFF" opacity="0" translation="[-5,-5]"/>
+        <Poster id="art" uri="pkg:/images/tile.9.png" blendColor="0x161616FF"/>
+        <Label id="artName" wrap="true" maxLines="3" vertAlign="bottom" color="0xFFFFFFFF" translation="[20,0]"/>
+        <Poster id="logo" loadDisplayMode="scaleToFit" visible="false"/>
+        <Group id="badge" visible="false">
+            <Poster id="badgeBack" uri="pkg:/images/panel.9.png" blendColor="0xFFFFFFFF" height="30"/>
+            <Label id="badgeText" color="0x000000FF" height="30" vertAlign="center" horizAlign="center"/>
+        </Group>
+        <Label id="title" color="0xFFFFFFFF" horizAlign="left"/>
+        <Label id="subtitle" color="0x949494FF" horizAlign="left"/>
+        <Rectangle id="track" color="0x2A2A2AFF" height="4" visible="false"/>
+        <Rectangle id="bar" color="0xE4AE78FF" height="4" visible="false"/>
+    </children>
+</component>
