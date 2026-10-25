@@ -47,6 +47,10 @@ main{margin-left:var(--sidebar);min-height:100vh;min-width:0}
 .card.movie{flex-basis:10rem}.movie .art{height:15rem}.movie .art.logo img{position:absolute;top:0;right:0;bottom:0;left:0;width:100%;height:100%;max-width:none;max-height:none;object-fit:cover}
 .card-info{display:block;padding:.625rem .125rem 0}.card-title{display:block;font-size:.875rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .card-sub{display:block;margin-top:.1875rem;color:var(--faint);font-size:.75rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.card-info .progress{margin-top:.5rem}
+/* Quality badges replace the tags Tidy names removes: the resolution is filled, stream tags are outlined. */
+.badges{display:inline-flex;align-items:center;flex:none;margin-left:.5rem;vertical-align:middle;line-height:1}.badge{display:inline-block;padding:.1875rem .3125rem;border:1px solid var(--control);border-radius:4px;color:var(--muted);font-size:.6875rem;font-weight:600;letter-spacing:.04em;line-height:1;white-space:nowrap}.badge+.badge{margin-left:.25rem}.badge.quality{border-color:#fff;background:#fff;color:#000;font-weight:700}
+.art .badges{position:absolute;top:.5rem;right:.5rem;margin:0}.art .badge{border-color:rgba(255,255,255,.3);background:rgba(0,0,0,.72);color:#fff}.art .badge.quality{border-color:#fff;background:#fff;color:#000}
+.named{display:flex;align-items:center;min-width:0}.named strong{min-width:0}.guide-channel .badges{margin-left:.375rem}.feature h2 .badges,.dialog h2 .badges{margin-left:.75rem}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(13rem,1fr));gap:1.5rem 1rem}.grid .card{width:100%}.grid.movies{grid-template-columns:repeat(auto-fill,minmax(10rem,1fr))}
 
 /* Filters */
