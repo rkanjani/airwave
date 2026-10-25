@@ -149,6 +149,7 @@ no earlier Git history, tag, merged PR or removal record to reconstruct here.
 | 2026-10-24 | Added casting from Chrome and iOS, with an opt-in token-protected LAN cast listener for private-library items | `409c158` |
 | 2026-10-24 | Replaced the macOS system player bar with compact Airwave controls; search results play directly | `4402043` |
 | 2026-10-24 | Apple apps pick AVPlayer or mpv (MPVKit) per title, with one-time fallback, raw-TS live start-up and MKV/AVI playback | `532f99b` |
+| 2026-10-24 | Replaced the signal-arc icon with the wave bands mark across favicon, Samsung icon and in-app brand | `6c74acf` |
 | 2026-10-24 | Added Tidy names (on by default): cleaned channel and group names with resolution and HDR/HEVC badges | `b9d6c93` |
 
 The initial import is evidence of the current implementation, not a claim that all its
