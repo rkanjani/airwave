@@ -182,6 +182,7 @@ no earlier Git history, tag, merged PR or removal record to reconstruct here.
 | 2026-10-24 | Library tiles show catalog artwork and XMLTV programme images, with tinted fallbacks and viewport-limited loading | `69402e1` |
 | 2026-10-25 | Measured AVPlayer super-resolution; added it as an SD-only opt-in (`-AirwaveSuperResolution YES`) | `270181a`, `0136ca6` |
 | 2026-10-25 | macOS and iOS apps use the wave bands mark as their app icon | `8dea7f8` |
+| 2026-10-25 | Movies show their own subtitle track by default; a captions popover turns subtitles off, switches track or loads an SRT/WebVTT file | `a116e7c` |
 
 The initial import is evidence of the current implementation, not a claim that all its
 features were originally written in that commit. Pre-import observations are recorded
