@@ -105,7 +105,6 @@ main{margin-left:var(--sidebar);min-height:100vh;min-width:0}
 .modal-open{overflow:hidden}#modal{position:fixed;z-index:30;top:0;right:0;bottom:0;left:0;display:flex;align-items:center;justify-content:center;padding:2rem;background:rgba(0,0,0,.72)}#modal[hidden],#player[hidden],#toast[hidden]{display:none}
 .dialog{width:36rem;max-width:100%;max-height:90vh;overflow:auto;padding:2rem;border-radius:20px;background:var(--surface);box-shadow:0 24px 80px rgba(0,0,0,.6)}
 .dialog h2{font-size:1.5rem;font-weight:600;letter-spacing:-.01em}.dialog p{margin-top:.75rem;color:var(--muted);font-size:.9375rem;line-height:1.55}.dialog .meta{margin-top:.375rem}
-.dialog .dialog-now{color:#fff}.dialog .progress{margin-top:1.25rem}.dialog .resume-note{margin-top:.625rem;color:#fff;font-size:.875rem}.dialog .credit{font-size:.8125rem;color:var(--faint)}
 .dialog label{display:block;margin:1.25rem 0 .5rem;font-size:.875rem;font-weight:500}.dialog input:not([type=checkbox]),.dialog textarea{display:block;width:100%;padding:.75rem .875rem;border:1px solid var(--control);border-radius:10px;background:#000;color:#fff}
 .dialog textarea{height:8.75rem;resize:vertical;font-size:.8125rem;line-height:1.5}.dialog input::placeholder,.dialog textarea::placeholder{color:var(--faint)}
 .dialog .check{display:flex;gap:.75rem;align-items:center;font-weight:400;line-height:1.5}.check input{width:1.25rem;height:1.25rem;accent-color:#fff}.dialog .hint{margin-top:.5rem;font-size:.8125rem;color:var(--faint)}

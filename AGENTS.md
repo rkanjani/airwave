@@ -81,6 +81,7 @@ The initial work centered on shared browsing and platform playback; there is not
 - Reset clears browser preferences and the Apple artwork cache, not the relay's external catalog or the Apple encrypted file. Check the actual storage path before promising deletion.
 - Apple uses an ATS HTTP-media exception. No certificate validation bypass is present. Review the exception for distribution.
 - Mocked AVPlay tests and successful compilation do not prove device playback. See `VERIFICATION.md`.
+- The relay's 20-second upstream idle limit guards connecting, headers and playlist reads only. `pipeMedia` lifts it for media bodies, because a paused player or a Cast receiver with a full buffer stops reading a movie for longer than that.
 - The Cast sender tests use a synthetic framework; real receiver playback needs a Cast device on the owner's network. The Cast SDK only loads in Chrome on a secure origin (`http://127.0.0.1` counts, `localhost` fails the relay's Host check), and the iOS target needs `@executable_path/Frameworks` to load the SDK.
 
 ## Releasing

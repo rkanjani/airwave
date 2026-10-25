@@ -111,7 +111,7 @@ This produces a signed widget in `dist/`. Source ZIPs are not installable widget
 
 ## Features and boundaries
 
-- Library browsing, title/group search, favorites, movie progress with a resume choice, details, M3U and XMLTV import, remote/keyboard navigation.
+- Library browsing, title/group search, favorites, movie progress that resumes where you stopped, one-click playback from any tile, M3U and XMLTV import, remote/keyboard navigation.
 - Sports scores: follow leagues (NFL, NBA, MLB, NHL, WNBA, MLS, college football and basketball, Premier League, Champions League) in Settings to see their games at the top of Home. Choosing a game plays the channel that the guide, the channel names or the broadcaster point to. Scores come from ESPN's public scoreboard feed and load only while a league is followed.
 - Browser and Samsung playback share one control layer: movies get a seek bar the remote scrubs (left/right to choose, OK to jump, Back to cancel), skip 10 seconds and Start over; live channels show the current programme, what is next and a Guide shortcut.
 - Phone layout uses touch-sized controls and safe-area spacing. macOS native playback uses a compact Airwave control bar; iOS uses system video controls for AVPlayer and the compact bar for mpv.
