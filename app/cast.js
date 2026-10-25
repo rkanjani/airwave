@@ -6,7 +6,7 @@
   var types={mp4:'video/mp4',m4v:'video/mp4',mov:'video/quicktime',webm:'video/webm',mkv:'video/x-matroska',ts:'video/mp2t',m3u8:'application/x-mpegurl'};
   function guessType(url){var m=/\.([a-z0-9]{2,4})(?:[?#]|$)/i.exec(url.split('?')[0]);return types[m&&m[1].toLowerCase()]||'video/mp4';}
   function relayed(url){return /^\/api\/media\/[^/]+$/.test(url||'');}
-  function Cast(options){this.win=options.window;this.emit=options.emit||function(){};this.fetch=options.fetch||function(url,init){return options.window.fetch(url,init);};this.context=null;this.remote=null;this.controller=null;this.generation=0;this.active=false;this.preparing=false;this.relay=false;this.device='';this.lastTime=0;this.loading=false;}
+  function Cast(options){this.win=options.window;this.emit=options.emit||function(){};this.title=options.title||function(item){return item.name;};this.fetch=options.fetch||function(url,init){return options.window.fetch(url,init);};this.context=null;this.remote=null;this.controller=null;this.generation=0;this.active=false;this.preparing=false;this.relay=false;this.device='';this.lastTime=0;this.loading=false;}
   Cast.supported=function(win){var agent=win.navigator&&win.navigator.userAgent||'';return !(win.AirwavePlatform&&win.AirwavePlatform.native)&&!win.tizen&&!!win.isSecureContext&&/Chrome\//.test(agent);};
   // The SDK is fetched on first use of the player, not at startup.
   Cast.prototype.load=function(){if(this.loading)return;this.loading=true;var self=this,win=this.win;win.__onGCastApiAvailable=function(ok){if(ok)self.setup(win.cast.framework,win.chrome.cast);};var script=win.document.createElement('script');script.src=SDK;script.async=true;win.document.head.appendChild(script);};
@@ -33,7 +33,7 @@
     return ready.then(function(){return self.source(item);},function(e){if(e==='cancel'||e&&e.code==='cancel')return null;throw new Error('Could not connect to the Cast device.');}).then(function(src){
       if(!src||g!==self.generation)return false;var session=self.context.getCurrentSession();if(!session)return false;
       var info=new C.media.MediaInfo(src.url,src.contentType),meta=new C.media.GenericMediaMetadata(),live=item.kind==='live';
-      info.streamType=live?C.media.StreamType.LIVE:C.media.StreamType.BUFFERED;meta.title=item.name;if(src.logo)meta.images=[new C.Image(src.logo)];info.metadata=meta;
+      info.streamType=live?C.media.StreamType.LIVE:C.media.StreamType.BUFFERED;meta.title=self.title(item);if(src.logo)meta.images=[new C.Image(src.logo)];info.metadata=meta;
       var request=new C.media.LoadRequest(info);request.autoplay=true;request.currentTime=live?0:time||0;
       self.active=true;self.preparing=true;self.lastTime=request.currentTime;self.device=session.getCastDevice().friendlyName||'your TV';self.emit('cast-started',self.device);self.emit('loading','Connecting to '+self.device+'…');
       return session.loadMedia(request).then(function(){if(g===self.generation)self.preparing=false;return true;},function(){if(g!==self.generation)return false;self.ended();throw new Error(self.device+' could not play this title. Its format or source may not support casting.');});

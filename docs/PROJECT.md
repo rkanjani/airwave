@@ -102,6 +102,13 @@ CI runs on GitHub Actions. There is no analytics, cloud-sync or Airwave account 
 - Plain M3U import is limited to 5 MB/10,000 entries. Its optional remembered library
   uses local-storage version 1 and is unencrypted. XMLTV imports are limited to 10 MB
   and kept only for the session. Favorites/history are separate local-storage keys.
+- Tidy names (`airwave.tidyNames`, on unless stored `false`; Reset clears it) changes only
+  what is displayed. `AirwaveCore.tidyName` strips region prefixes, divider runs, styled Unicode
+  letters and all-caps, and returns the resolution (8K/4K/FHD/HD/SD) plus HDR/HEVC tags for
+  badges; RAW and frame-rate notes are dropped without a badge. `tidyGroups` keeps the region
+  ("US · Sling") and falls back to tags, then the raw name, when two groups would read the same.
+  Stored items, IDs, search and favorites still use playlist names; native and Cast playback
+  receive the displayed title through the adapters' `title` option (`tests/core.test.cjs`).
 - Bridge request IDs correlate responses; playback tokens reject stale events. Default
   native timeout is 30 seconds, document picking 5 minutes (`tests/platform.test.cjs`).
 - Casting a relay item mints one cast token through the cookie-guarded `POST /api/cast`
