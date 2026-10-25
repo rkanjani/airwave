@@ -112,6 +112,13 @@ CI runs on GitHub Actions. There is no analytics, cloud-sync or Airwave account 
 - Plain M3U import is limited to 5 MB/10,000 entries. Its optional remembered library
   uses local-storage version 1 and is unencrypted. XMLTV imports are limited to 10 MB
   and kept only for the session. Favorites/history are separate local-storage keys.
+- Tidy names (`airwave.tidyNames`, on unless stored `false`; Reset clears it) changes only
+  what is displayed. `AirwaveCore.tidyName` strips region prefixes, divider runs, styled Unicode
+  letters and all-caps, and returns the resolution (8K/4K/FHD/HD/SD) plus HDR/HEVC tags for
+  badges; RAW and frame-rate notes are dropped without a badge. `tidyGroups` keeps the region
+  ("US · Sling") and falls back to tags, then the raw name, when two groups would read the same.
+  Stored items, IDs, search and favorites still use playlist names; native and Cast playback
+  receive the displayed title through the adapters' `title` option (`tests/core.test.cjs`).
 - Bridge request IDs correlate responses; playback tokens reject stale events. Default
   native timeout is 30 seconds, document picking 5 minutes (`tests/platform.test.cjs`).
 - Casting a relay item mints one cast token through the cookie-guarded `POST /api/cast`
@@ -143,6 +150,7 @@ no earlier Git history, tag, merged PR or removal record to reconstruct here.
 | 2026-10-24 | Replaced the macOS system player bar with compact Airwave controls; search results play directly | `4402043` |
 | 2026-10-24 | Apple apps pick AVPlayer or mpv (MPVKit) per title, with one-time fallback, raw-TS live start-up and MKV/AVI playback | `532f99b` |
 | 2026-10-24 | Replaced the signal-arc icon with the wave bands mark across favicon, Samsung icon and in-app brand | `6c74acf` |
+| 2026-10-24 | Added Tidy names (on by default): cleaned channel and group names with resolution and HDR/HEVC badges | `b9d6c93` |
 | 2026-10-24 | Apple playback no longer shows the web and native player screens together; focus returns to the row that started playback; search waits for a typing pause | `480afd1` |
 | 2026-10-24 | AVPlayer starts follow a provider redirect once instead of on each of its two initial playlist requests | `76cdad6` |
 
