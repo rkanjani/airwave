@@ -1,16 +1,17 @@
 const http=require('node:http'),fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
-const {upstream,readLimited}=require('../server/network.cjs'),{makeLibrary,rewriteManifest}=require('../server/library.cjs'),{makeCast,castHandler,lanAddress}=require('../server/cast.cjs');
+const {upstream,readLimited,readBytes}=require('../server/network.cjs'),{makeLibrary,rewriteManifest}=require('../server/library.cjs'),{makeArtwork}=require('../server/artwork.cjs'),{makeCast,castHandler,lanAddress}=require('../server/cast.cjs');
 const root=path.resolve(__dirname,'../app'),port=Number(process.env.AIRWAVE_PORT)||4317,host='127.0.0.1:'+port,origin='http://'+host,token=crypto.randomBytes(32).toString('hex');
 const library=process.env.AIRWAVE_LIBRARY_PATH?makeLibrary(JSON.parse(fs.readFileSync(process.env.AIRWAVE_LIBRARY_PATH,'utf8'))):null;
 const castAddress=process.env.AIRWAVE_CAST==='1'&&library?process.env.AIRWAVE_CAST_HOST||lanAddress():'',castPort=Number(process.env.AIRWAVE_CAST_PORT)||port+1;
 const cast=castAddress?makeCast(library,castAddress+':'+castPort):null;
+const artwork=makeArtwork({load:async(url,max)=>{const up=(await upstream(url)).response;if(up.statusCode<200||up.statusCode>=300||Number(up.headers['content-length'])>max){up.destroy();return null;}return {type:String(up.headers['content-type']||'').split(';')[0].trim().toLowerCase(),body:await readBytes(up,max)};}});
 const types={'.html':'text/html','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png','.xml':'application/xml','.webmanifest':'application/manifest+json'};
 // Shared by the loopback app and the cast listener; register decides which prefix rewritten playlist entries carry.
-async function proxy(req,res,pathname,register){const resource=library.resources.get(pathname);if(!resource){res.writeHead(404);return res.end();}const headers={};if(req.headers.range&&/^bytes=\d*-\d*$/.test(req.headers.range))headers.Range=req.headers.range;
+async function proxy(req,res,pathname,register){const resource=library.resources.get(pathname);if(!resource){res.writeHead(404);return res.end();}
+if(resource.kind==='image'){const art=await artwork.get(pathname,resource.url);if(!art){res.writeHead(404);return res.end();}res.setHeader('Content-Type',art.type);res.setHeader('Cache-Control','private, max-age=86400');return res.end(art.body);}const headers={};if(req.headers.range&&/^bytes=\d*-\d*$/.test(req.headers.range))headers.Range=req.headers.range;
 try{const result=await upstream(resource.url,headers),up=result.response;res.on('close',()=>up.destroy());
 if(up.statusCode<200||up.statusCode>=300){up.resume();res.writeHead(502);return res.end('The stream source is unavailable.');}
 if(resource.kind==='hls'||/mpegurl/i.test(up.headers['content-type']||'')){const body=rewriteManifest(await readLimited(up,2*1024*1024),result.url,register);res.setHeader('Content-Type','application/vnd.apple.mpegurl');return res.end(body);}
-if(resource.kind==='image'&&!/^image\//.test(up.headers['content-type']||'')){up.destroy();res.writeHead(415);return res.end();}
 res.statusCode=up.statusCode;for(const h of ['content-type','content-length','content-range','accept-ranges'])if(up.headers[h])res.setHeader(h,up.headers[h]);up.on('error',()=>res.destroy());return up.pipe(res);
 }catch(e){if(!res.headersSent){res.writeHead(502);res.end('The source could not be reached.');}else res.destroy();}}
 const server=http.createServer(async(req,res)=>{res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');

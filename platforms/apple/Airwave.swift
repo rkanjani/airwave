@@ -5,6 +5,7 @@ import AVKit
 import CryptoKit
 import Security
 import UniformTypeIdentifiers
+import ImageIO
 import os
 import VideoToolbox
 import Libmpv
@@ -65,9 +66,14 @@ final class AirwaveModel: NSObject, ObservableObject, WKScriptMessageHandler, WK
     private let store = PrivateCatalogStore()
     private var networkTasks: [String: Task<Void, Never>] = [:]
     private var castItem: CastItem?
+    let artwork = ArtworkSchemeHandler()
 
     func configure(_ view: WKWebView) {
         webView = view
+        artwork.lookup = { [weak self] id in
+            guard let raw = self?.media[id]?["logo"] as? String, let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+            return url
+        }
         view.navigationDelegate = self
         #if os(iOS)
         GCKCastContext.sharedInstance().sessionManager.add(self)
@@ -104,6 +110,7 @@ final class AirwaveModel: NSObject, ObservableObject, WKScriptMessageHandler, WK
             start(next)
             reply(id, result: true)
         case "stop": stop(); reply(id, result: true)
+        case "clearArtwork": artwork.clear(); reply(id, result: true)
         case "toggle": playback?.toggle(); reply(id, result: true)
         case "seek": playback?.seek(by: payload["delta"] as? Double ?? 0); reply(id, result: true)
         case "fetchText":
@@ -215,8 +222,8 @@ final class AirwaveModel: NSObject, ObservableObject, WKScriptMessageHandler, WK
             var safe = item
             safe.removeValue(forKey: "source")
             safe["url"] = "airwave-native://" + id
-            // Artwork is optional. Keep the provider URLs entirely in native storage.
-            safe["logo"] = ""
+            // Artwork is optional. The web view gets an opaque artwork ID; provider URLs stay in native storage.
+            safe["logo"] = artwork.lookup(id) != nil ? ArtworkSchemeHandler.address(id) : ""
             return safe
         }
         return ["version": 2, "private": true, "name": catalog?["name"] as? String ?? "My library", "items": items]
@@ -319,6 +326,92 @@ struct PrivateCatalogStore {
     func write(_ data: Data) throws { let sealed = try AES.GCM.seal(data, using: key()); guard let bytes = sealed.combined else { throw CocoaError(.fileWriteUnknown) }; let url = try file; try bytes.write(to: url, options: [.atomic]); try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path) }
 }
 
+// Tile artwork for the web view: airwave-art://logo/<id> resolves to the catalog's image in native code.
+// Images are downsampled once and kept in Caches; failures are remembered for a day.
+@MainActor final class ArtworkSchemeHandler: NSObject, WKURLSchemeHandler {
+    static let scheme = "airwave-art"
+    private static let idCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~")
+    static func address(_ id: String) -> String { scheme + "://logo/" + (id.addingPercentEncoding(withAllowedCharacters: idCharacters) ?? "") }
+    var lookup: (String) -> URL? = { _ in nil }
+    private let cache = ArtworkCache()
+    private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
+    func webView(_ webView: WKWebView, start task: WKURLSchemeTask) {
+        let key = ObjectIdentifier(task)
+        guard let url = task.request.url, url.host == "logo", case let id = String(url.path.dropFirst()), let source = lookup(id) else { return task.didFailWithError(URLError(.fileDoesNotExist)) }
+        tasks[key] = Task { [weak self] in
+            let image = await self?.cache.image(id: id, source: source)
+            // A stopped task must not be answered.
+            guard let self, self.tasks.removeValue(forKey: key) != nil else { return }
+            guard let image else { return task.didFailWithError(URLError(.cannotDecodeContentData)) }
+            task.didReceive(URLResponse(url: url, mimeType: image.mime, expectedContentLength: image.data.count, textEncodingName: nil))
+            task.didReceive(image.data)
+            task.didFinish()
+        }
+    }
+    func webView(_ webView: WKWebView, stop task: WKURLSchemeTask) { tasks.removeValue(forKey: ObjectIdentifier(task))?.cancel() }
+    func clear() { Task { await cache.clear() } }
+}
+actor ArtworkCache {
+    struct Image { let data: Data; let mime: String }
+    private let maxSource = 4_000_000, maxFolder = 200_000_000, fresh: TimeInterval = 7 * 86_400, failFor: TimeInterval = 86_400
+    private var pending: [String: Task<Image?, Never>] = [:]
+    private var pruned = false
+    private var folder: URL? { try? FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("Airwave/Artwork", isDirectory: true) }
+    func image(id: String, source: URL) async -> Image? {
+        let name = SHA256.hash(data: Data((id + "\n" + source.absoluteString).utf8)).map { String(format: "%02x", $0) }.joined()
+        if let job = pending[name] { return await job.value }
+        let job = Task { await load(name, source) }
+        pending[name] = job
+        let image = await job.value
+        pending[name] = nil
+        return image
+    }
+    func clear() { if let folder { try? FileManager.default.removeItem(at: folder) } }
+    private func load(_ name: String, _ source: URL) async -> Image? {
+        guard let folder else { return nil }
+        let files = FileManager.default
+        try? files.createDirectory(at: folder, withIntermediateDirectories: true)
+        if !pruned { pruned = true; prune(folder) }
+        let png = folder.appendingPathComponent(name + ".png"), jpg = folder.appendingPathComponent(name + ".jpg"), miss = folder.appendingPathComponent(name + ".miss")
+        let saved = [png, jpg].first { files.fileExists(atPath: $0.path) }.flatMap { url in (try? Data(contentsOf: url)).map { Image(data: $0, mime: url.pathExtension == "png" ? "image/png" : "image/jpeg") } }
+        if let saved, let file = [png, jpg].first(where: { files.fileExists(atPath: $0.path) }), age(file) < fresh { return saved }
+        if age(miss) < failFor { return saved }
+        do {
+            var request = URLRequest(url: source); request.timeoutInterval = 15
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode), data.count <= maxSource, let image = Self.downsample(data) else { throw URLError(.cannotDecodeContentData) }
+            for file in [png, jpg, miss] { try? files.removeItem(at: file) }
+            try? image.data.write(to: image.mime == "image/png" ? png : jpg, options: .atomic)
+            return image
+        } catch {
+            files.createFile(atPath: miss.path, contents: nil)
+            return saved
+        }
+    }
+    private func age(_ url: URL) -> TimeInterval { (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate).map { Date().timeIntervalSince($0) } ?? .infinity }
+    // Tiles are at most about 480 px at 2x; logos with transparency stay PNG.
+    private static func downsample(_ data: Data) -> Image? {
+        let options = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: 512] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil), let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options) else { return nil }
+        let alpha = ![.none, .noneSkipFirst, .noneSkipLast].contains(image.alphaInfo), out = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(out, (alpha ? UTType.png : UTType.jpeg).identifier as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(destination, image, alpha ? nil : [kCGImageDestinationLossyCompressionQuality: 0.82] as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return Image(data: out as Data, mime: alpha ? "image/png" : "image/jpeg")
+    }
+    // Keep the folder under its cap by dropping the least recently written images.
+    private func prune(_ folder: URL) {
+        let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey]
+        guard let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys) else { return }
+        var entries = files.compactMap { url -> (URL, Int, Date)? in
+            guard let values = try? url.resourceValues(forKeys: Set(keys)) else { return nil }
+            return (url, values.fileSize ?? 0, values.contentModificationDate ?? .distantPast)
+        }.sorted { $0.2 < $1.2 }
+        var total = entries.reduce(0) { $0 + $1.1 }
+        while total > maxFolder * 4 / 5, !entries.isEmpty { let (url, size, _) = entries.removeFirst(); try? FileManager.default.removeItem(at: url); total -= size }
+    }
+}
+
 // Playback engines. AVPlayer plays what Apple decodes natively and can route to AirPlay; mpv (libmpv
 // with FFmpeg, from MPVKit) plays raw MPEG-TS live channels and containers AVPlayer rejects.
 // AirwaveModel and the controls see only this protocol, so the bridge contract is engine-agnostic.
@@ -402,11 +495,19 @@ enum PlaybackTiming {
     private let upscaler = SuperResolution.make()
     // Drawn over the player's own picture while super-resolution is active.
     var overlay: CALayer? { upscaler?.layer }
+    private var resolving: Task<Void, Never>?
     var time: Double { finite(player.currentTime().seconds) }
     var duration: Double { finite(player.currentItem?.duration.seconds ?? 0) }
     var volume: Float { get { player.volume } set { player.volume = newValue } }
     var muted: Bool { get { player.isMuted } set { player.isMuted = newValue } }
     func load(_ url: URL, resume: Double) {
+        resolving = Task { [weak self] in
+            let source = await RedirectResolver.resolve(url)
+            guard !Task.isCancelled, let self else { return }
+            self.attach(source, resume: resume)
+        }
+    }
+    private func attach(_ url: URL, resume: Double) {
         let item = AVPlayerItem(url: url)
         player.replaceCurrentItem(with: item)
         upscaler?.attach(item)
@@ -462,6 +563,7 @@ enum PlaybackTiming {
     func pause() { player.pause() }
     func seek(to seconds: Double) { upscaler?.flush(); player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600)) }
     func close() {
+        resolving?.cancel(); resolving = nil
         onEvent = { _ in }
         upscaler?.close()
         observers.forEach { $0.invalidate() }; observers = []
@@ -591,6 +693,29 @@ enum SuperResolution {
 }
 #endif
 
+// Providers often answer a channel URL with a 302 to a session host, and AVPlayer requests an HLS playlist
+// twice while starting, paying that redirect and a new connection each time; later refreshes already use the
+// target. Following the redirect once here and handing AVPlayer the target saves one of those legs. Hosts that
+// answered directly are remembered for the session so they skip the check. Any failure keeps the original URL.
+@MainActor enum RedirectResolver {
+    private static var direct: Set<String> = []
+    private final class StopAtRedirect: NSObject, URLSessionTaskDelegate {
+        func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
+    }
+    private static let session = URLSession(configuration: .ephemeral)
+    static func resolve(_ url: URL) async -> URL {
+        guard let host = url.host?.lowercased(), !direct.contains(host) else { return url }
+        var request = URLRequest(url: url); request.timeoutInterval = 3
+        guard let answer = try? await session.bytes(for: request, delegate: StopAtRedirect()) else { return url }
+        answer.0.task.cancel()
+        // One hop: checking the target for another redirect would cost the full request this saves.
+        guard let http = answer.1 as? HTTPURLResponse, (300..<400).contains(http.statusCode),
+              let location = http.value(forHTTPHeaderField: "Location"), let target = URL(string: location, relativeTo: url)?.absoluteURL,
+              ["http", "https"].contains(target.scheme?.lowercased() ?? "") else { direct.insert(host); return url }
+        return target
+    }
+}
+
 // MoltenVK briefly shrinks the drawable to 1×1 to force a presentation; ignoring that avoids flicker (mpv-player/mpv#13651).
 final class MPVLayer: CAMetalLayer {
     override var drawableSize: CGSize {
@@ -621,7 +746,16 @@ private final class MPVRelay: @unchecked Sendable { weak var engine: MPVEngine? 
         ("vo", "gpu-next"), ("gpu-api", "vulkan"), ("gpu-context", "moltenvk"), ("hwdec", "videotoolbox"),
         ("config", "no"), ("ytdl", "no"), ("terminal", "no"), ("input-default-bindings", "no"), ("input-media-keys", "no"),
         ("idle", "yes"), ("keep-open", "no"), ("network-timeout", "20"), ("demuxer-lavf-analyzeduration", "0.5"),
+        // mpv's built-in scripts are Lua, and LuaJIT writes executable memory, which the hardened runtime
+        // kills (OS_REASON_CODESIGNING) in any signed build. Airwave draws its own controls, so none are needed.
+        ("load-scripts", "no"), ("osc", "no"), ("load-stats-overlay", "no"), ("load-console", "no"), ("load-osd-console", "no"),
+        ("load-auto-profiles", "no"), ("load-select", "no"), ("load-positioning", "no"), ("load-commands", "no"), ("load-context-menu", "no"),
     ]
+    // Debanding smooths the stepped gradients of low-bitrate live channels at no measurable GPU cost.
+    // Upscaling stays on mpv's default lanczos: ewa_lanczossharp doubled GPU time with no visible gain.
+    // Launch with `-AirwaveDeband NO` to compare.
+    static let picture: [(String, String)] = UserDefaults.standard.object(forKey: "AirwaveDeband") != nil
+        && !UserDefaults.standard.bool(forKey: "AirwaveDeband") ? [] : [("deband", "yes")]
     init() {
         // MoltenVK otherwise prints its device report to the console for every new player.
         setenv("MVK_CONFIG_LOG_LEVEL", "1", 0)
@@ -631,7 +765,7 @@ private final class MPVRelay: @unchecked Sendable { weak var engine: MPVEngine? 
         guard let h = mpv_create() else { return }
         var wid = Int64(Int(bitPattern: Unmanaged.passUnretained(layer).toOpaque()))
         mpv_set_option(h, "wid", MPV_FORMAT_INT64, &wid)
-        for (name, value) in Self.options { mpv_set_option_string(h, name, value) }
+        for (name, value) in Self.options + Self.picture { mpv_set_option_string(h, name, value) }
         guard mpv_initialize(h) >= 0 else { mpv_terminate_destroy(h); return }
         for (name, format) in [("time-pos", MPV_FORMAT_DOUBLE), ("duration", MPV_FORMAT_DOUBLE), ("pause", MPV_FORMAT_FLAG), ("paused-for-cache", MPV_FORMAT_FLAG)] {
             mpv_observe_property(h, 0, name, format)
@@ -751,13 +885,13 @@ private final class MPVRelay: @unchecked Sendable { weak var engine: MPVEngine? 
 #if os(macOS)
 struct AirwaveWebView: NSViewRepresentable {
     let model: AirwaveModel
-    func makeNSView(context: Context) -> WKWebView { let configuration = WKWebViewConfiguration(); configuration.userContentController.add(model, name: "airwave"); let view = WKWebView(frame: .zero, configuration: configuration); model.configure(view); return view }
+    func makeNSView(context: Context) -> WKWebView { let configuration = WKWebViewConfiguration(); configuration.setURLSchemeHandler(model.artwork, forURLScheme: ArtworkSchemeHandler.scheme); configuration.userContentController.add(model, name: "airwave"); let view = WKWebView(frame: .zero, configuration: configuration); model.configure(view); return view }
     func updateNSView(_ view: WKWebView, context: Context) {}
 }
 #else
 struct AirwaveWebView: UIViewRepresentable {
     let model: AirwaveModel
-    func makeUIView(context: Context) -> WKWebView { let configuration = WKWebViewConfiguration(); configuration.allowsInlineMediaPlayback = true; configuration.userContentController.add(model, name: "airwave"); let view = WKWebView(frame: .zero, configuration: configuration); view.scrollView.contentInsetAdjustmentBehavior = .never; model.configure(view); return view }
+    func makeUIView(context: Context) -> WKWebView { let configuration = WKWebViewConfiguration(); configuration.allowsInlineMediaPlayback = true; configuration.setURLSchemeHandler(model.artwork, forURLScheme: ArtworkSchemeHandler.scheme); configuration.userContentController.add(model, name: "airwave"); let view = WKWebView(frame: .zero, configuration: configuration); view.scrollView.contentInsetAdjustmentBehavior = .never; model.configure(view); return view }
     func updateUIView(_ view: WKWebView, context: Context) {}
 }
 #endif

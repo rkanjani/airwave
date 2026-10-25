@@ -21,7 +21,7 @@ Samsung target is Tizen 6.0+. Physical iOS and Samsung TV playback remain unveri
 | `platforms/apple/Airwave.swift` | iOS/macOS SwiftUI shell, bundled WKWebView, AVPlayer and mpv playback engines with automatic selection and fallback, compact native controls, document picker, AES-GCM catalog storage with Keychain key |
 | `app/config.xml` | Samsung TV packaging and privileges |
 
-Apple apps bundle the interface and connect directly to the provider; they do not depend on the local web server. Native catalog credentials never enter the web view. Native artwork currently uses original placeholder artwork. The web relay keeps provider credentials out of the browser library payload. Web and Apple catalogs are private, device-local copies; there is no cloud synchronization.
+Apple apps bundle the interface and connect directly to the provider; they do not depend on the local web server. Native catalog credentials never enter the web view. Tile artwork comes from the catalog's logos and posters (resolved natively on Apple, through the relay on the web) and from XMLTV programme icons; titles without artwork show their name on a flat tint. The web relay keeps provider credentials out of the browser library payload. Web and Apple catalogs are private, device-local copies; there is no cloud synchronization.
 
 ## Development
 

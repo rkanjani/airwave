@@ -40,6 +40,22 @@ Start-up was timed from play request to first frame, where first frame means the
 - Size: unsigned Release builds went from 9.8 MB to 42.6 MB for iOS (arm64; executable 0.7 MB to 34 MB) and from 1.9 MB to 84 MB for macOS (arm64 + x86_64).
 - Not verified: physical iPhone/iPad decode, battery and thermal cost of mpv, HDR output, AirPlay handover, the 8 s/15 s mpv start deadlines on a real stalled stream, and provider channels beyond that one observation.
 
+## mpv picture quality (October 2026)
+
+A scratch harness ran the shipped `MPVEngine` in a 3024×1832 px window on an M3 Pro Mac (macOS 26), playing simulated raw-TS live channels from a local ffmpeg relay: Big Buck Bunny at 854×480 (1.2 Mbit/s) and 1280×720 (2.5 Mbit/s), and slow dark gradients at 854×480 (400 kbit/s). GPU time is the sum of libplacebo's average fresh-frame pass times (`vo-passes`); dropped frames were counted from 5 s after the first frame.
+
+| mpv setting | GPU ms per frame (480p → 3024×1832) |
+|---|---|
+| Defaults (lanczos) | 7.7–9.6 |
+| `deband=yes` (shipped) | 7.2–9.3 |
+| `scale=spline36` | 8.4 |
+| `scale=ewa_lanczos` | 16.1 |
+| `scale=ewa_lanczossharp` | 16.4–17.1 |
+
+- On the same paused frame, `ewa_lanczossharp` looked nearly identical to lanczos at 1:1 (slightly less ringing, no added detail), so it was not adopted. At 60 fps its cost would exceed the 16.7 ms frame budget on this Mac.
+- Deband replaced the gradient channel's blocky steps with a smooth ramp and fine grain. On detailed content it slightly softens low-contrast texture. It had no measurable GPU or start-up cost, and dropped frames stayed at 0–2 per channel with or without it.
+- Not verified: provider channels, the macOS and iOS apps themselves (both compile; the harness used the shipped engine code), physical iPhone/iPad GPU and battery cost, and Intel Macs.
+
 ## Remaining verification
 
 Physical Samsung installation and remote controls; Samsung firmware and codecs; signing and WGT packaging; physical iOS playback; public hosting; App Store distribution; series resolution; full codec coverage; provider refresh. The browser and Samsung players do not support MKV/AVI; on Apple they depend on mpv. Hardware playback is not proven by mocked AVPlay tests or successful Apple builds.
