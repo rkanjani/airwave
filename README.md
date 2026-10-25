@@ -110,7 +110,7 @@ This produces a signed widget in `dist/`. Source ZIPs are not installable widget
 
 ## Features and boundaries
 
-- Library browsing, title/group search, favorites, movie progress with a resume choice, details, M3U and XMLTV import, remote/keyboard navigation.
+- Library browsing, title/group search, favorites, movie progress that resumes where you stopped, one-click playback from any tile, M3U and XMLTV import, remote/keyboard navigation.
 - Browser and Samsung playback share one control layer: movies get a seek bar the remote scrubs (left/right to choose, OK to jump, Back to cancel), skip 10 seconds and Start over; live channels show the current programme, what is next and a Guide shortcut.
 - Phone layout uses touch-sized controls and safe-area spacing. macOS native playback uses a compact Airwave control bar; iOS uses system video controls for AVPlayer and the compact bar for mpv.
 - The Apple apps choose a player per title: AVPlayer for HLS and MP4/MOV/M4V (and whenever AirPlay is in use), mpv for live channels given as raw `.ts`, MKV, AVI and other containers. If one can't start a title, the other gets one try, and the one that worked is used for that title until the app quits. AirPlay is offered only while AVPlayer plays.
