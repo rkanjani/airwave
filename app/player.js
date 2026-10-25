@@ -1,5 +1,13 @@
 (function(root,factory){var api=factory();if(typeof module==='object')module.exports=api;else root.AirwavePlayer=api;})(this,function(){
   'use strict';
+  // HLS.js is 600 KB and only browsers without native HLS need it, so it loads on the first such stream.
+  var hlsLoad=null;
+  function loadHls(){
+    if(typeof window==='undefined'||typeof document==='undefined')return Promise.resolve(null);
+    if(window.Hls)return Promise.resolve(window.Hls);
+    if(!hlsLoad)hlsLoad=new Promise(function(resolve){var s=document.createElement('script');s.src='vendor/hls.min.js';s.onload=function(){resolve(window.Hls||null);};s.onerror=function(){hlsLoad=null;resolve(null);};document.head.appendChild(s);});
+    return hlsLoad;
+  }
   // Own every callback by playback generation. Closing or switching invalidates old work.
   function Player(options){this.native=typeof window!=='undefined'&&window.AirwavePlatform&&window.AirwavePlatform.native;this.hls=null;this.video=options.video;this.av=options.av||null;this.emit=options.emit||function(){};this.generation=0;this.active=false;this.preparing=false;this.timer=null;this.resumeAt=0;this.listeners=[];}
   Player.prototype.close=function(){
@@ -31,12 +39,15 @@
     listen('timeupdate',function(){if(alive())self.emit('time',{time:v.currentTime,duration:v.duration});});
     listen('ended',function(){if(alive()){self.close();self.emit('ended');}});listen('error',fail);
     if(/\.m3u8(\?|$)/i.test(item.url)&&!v.canPlayType('application/vnd.apple.mpegurl')){
-      var Hls=typeof window!=='undefined'&&window.Hls;
-      if(!Hls||!Hls.isSupported()){this.close();this.emit('error','HLS playback is unavailable on this device.');return;}
-      var hls=this.hls=new Hls({enableWorker:true,debug:false,maxBufferLength:30});
-      hls.on(Hls.Events.MANIFEST_PARSED,function(){if(alive()){var p=v.play();if(p&&p.catch)p.catch(fail);}});
-      hls.on(Hls.Events.ERROR,function(_event,data){if(alive()&&data.fatal)fail();});
-      hls.loadSource(item.url);hls.attachMedia(v);return;
+      loadHls().then(function(Hls){
+        if(!alive())return;
+        if(!Hls||!Hls.isSupported()){self.close();self.emit('error','HLS playback is unavailable on this device.');return;}
+        var hls=self.hls=new Hls({enableWorker:true,debug:false,maxBufferLength:30});
+        hls.on(Hls.Events.MANIFEST_PARSED,function(){if(alive()){var p=v.play();if(p&&p.catch)p.catch(fail);}});
+        hls.on(Hls.Events.ERROR,function(_event,data){if(alive()&&data.fatal)fail();});
+        hls.loadSource(item.url);hls.attachMedia(v);
+      });
+      return;
     }
     v.src=item.url;var result=v.play();if(result&&result.catch)result.catch(fail);
   };

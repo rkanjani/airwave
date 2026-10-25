@@ -34,7 +34,12 @@
   }
   function currentProgram(programs,id,now){return (programs[id]||[]).find(function(p){return p.start<=now&&p.end>now;})||null;}
   function progress(program,now){return program?Math.max(0,Math.min(100,(now-program.start)/(program.end-program.start)*100)):0;}
-  function filter(items,query,group,kind){query=(query||'').trim().toLocaleLowerCase();return items.filter(function(x){return (!kind||x.kind===kind)&&(!group||group==='All'||x.group===group)&&(!query||(x.name+' '+x.group).toLocaleLowerCase().indexOf(query)>=0);});}
+  // Lowercased search text is built once per item, so each keystroke is only a substring scan.
+  var searchKeys=typeof WeakMap==='function'?new WeakMap():null;
+  function searchKey(x){var key=searchKeys&&searchKeys.get(x);if(key==null){key=(x.name+' '+x.group).toLocaleLowerCase();if(searchKeys)searchKeys.set(x,key);}return key;}
+  function filter(items,query,group,kind){query=(query||'').trim().toLocaleLowerCase();return items.filter(function(x){return (!kind||x.kind===kind)&&(!group||group==='All'||x.group===group)&&(!query||searchKey(x).indexOf(query)>=0);});}
+  // Keep only programmes that overlap [from, to); large XMLTV files otherwise stay in memory for days of schedule.
+  function trimGuide(programs,from,to){var out={};Object.keys(programs).forEach(function(id){var list=programs[id].filter(function(p){return p.end>from&&p.start<to;});if(list.length)out[id]=list;});return out;}
   function clock(seconds){seconds=Math.max(0,Math.floor(seconds||0));var h=Math.floor(seconds/3600),m=Math.floor(seconds%3600/60),s=String(seconds%60).padStart(2,'0');return h?h+':'+String(m).padStart(2,'0')+':'+s:m+':'+s;}
-  return {httpUrl:httpUrl,hash:hash,parseM3U:parseM3U,xmlTime:xmlTime,parseXMLTV:parseXMLTV,currentProgram:currentProgram,progress:progress,filter:filter,clock:clock};
+  return {httpUrl:httpUrl,hash:hash,parseM3U:parseM3U,xmlTime:xmlTime,parseXMLTV:parseXMLTV,currentProgram:currentProgram,progress:progress,filter:filter,trimGuide:trimGuide,clock:clock};
 });

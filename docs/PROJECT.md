@@ -63,7 +63,9 @@ Samsung -> app/config.xml -> app/index.html -> player.js -> Samsung AVPlay
 top bar plus five-tab bottom bar; screens of 1700px and wider scale the same layout for TV distance.
 The shared player shows a remote-scrubbable seek bar for movies and programme progress for live channels.
 The UI is shared; Apple video controls are native and Samsung remote keys are registered
-when the corresponding APIs exist. Browser playback uses native video or HLS.js.
+when the corresponding APIs exist. Browser playback uses native video or HLS.js, which is
+loaded only on the first HLS stream without native support. Imported XMLTV guides are trimmed
+to programmes from one hour ago through the next 48 hours.
 Callbacks are guarded by playback generation so abandoned streams cannot restart.
 
 `AirwavePlatform` loads private catalogs through the Apple bridge or local web endpoint.

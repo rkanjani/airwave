@@ -9,7 +9,7 @@ Read `docs/PROJECT.md` before changing platform boundaries, storage, packaging, 
 ## How it works
 
 1. `scripts/serve.cjs` serves `app/` on loopback; an optional `AIRWAVE_LIBRARY_PATH` loads a private catalog through `server/library.cjs`.
-2. `app/index.html` loads HLS.js, then `platform.js`, `core.js`, `player.js`, and `app.js`. `AirwavePlatform.loadLibrary()` selects the native bridge, local relay or demo fallback.
+2. `app/index.html` loads `platform.js`, `core.js`, `player.js`, and `app.js`. `player.js` loads `vendor/hls.min.js` on the first `.m3u8` stream the engine cannot play natively. `AirwavePlatform.loadLibrary()` selects the native bridge, local relay or demo fallback.
 3. `app/app.js` owns navigation, imports, favorites and progress. `app/player.js` selects Apple native playback, Samsung AVPlay or browser video/HLS.js.
 4. `platforms/apple/Airwave.swift` bundles that same interface, owns the native catalog, and presents AVPlayerView/AVPlayerViewController.
 
