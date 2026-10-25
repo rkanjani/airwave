@@ -1,5 +1,5 @@
 const http=require('node:http'),fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
-const {upstream,readLimited,readBytes}=require('../server/network.cjs'),{makeLibrary,rewriteManifest}=require('../server/library.cjs'),{makeArtwork}=require('../server/artwork.cjs'),{makeCast,castHandler,lanAddress}=require('../server/cast.cjs');
+const {upstream,readLimited,readBytes,pipeMedia}=require('../server/network.cjs'),{makeLibrary,rewriteManifest}=require('../server/library.cjs'),{makeArtwork}=require('../server/artwork.cjs'),{makeCast,castHandler,lanAddress}=require('../server/cast.cjs');
 const root=path.resolve(__dirname,'../app'),port=Number(process.env.AIRWAVE_PORT)||4317,host='127.0.0.1:'+port,origin='http://'+host,token=crypto.randomBytes(32).toString('hex');
 const library=process.env.AIRWAVE_LIBRARY_PATH?makeLibrary(JSON.parse(fs.readFileSync(process.env.AIRWAVE_LIBRARY_PATH,'utf8'))):null;
 const castAddress=process.env.AIRWAVE_CAST==='1'&&library?process.env.AIRWAVE_CAST_HOST||lanAddress():'',castPort=Number(process.env.AIRWAVE_CAST_PORT)||port+1;
@@ -12,7 +12,7 @@ if(resource.kind==='image'){const art=await artwork.get(pathname,resource.url);i
 try{const result=await upstream(resource.url,headers),up=result.response;res.on('close',()=>up.destroy());
 if(up.statusCode<200||up.statusCode>=300){up.resume();res.writeHead(502);return res.end('The stream source is unavailable.');}
 if(resource.kind==='hls'||/mpegurl/i.test(up.headers['content-type']||'')){const body=rewriteManifest(await readLimited(up,2*1024*1024),result.url,register);res.setHeader('Content-Type','application/vnd.apple.mpegurl');return res.end(body);}
-res.statusCode=up.statusCode;for(const h of ['content-type','content-length','content-range','accept-ranges'])if(up.headers[h])res.setHeader(h,up.headers[h]);up.on('error',()=>res.destroy());return up.pipe(res);
+return pipeMedia(up,res);
 }catch(e){if(!res.headersSent){res.writeHead(502);res.end('The source could not be reached.');}else res.destroy();}}
 const server=http.createServer(async(req,res)=>{res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');
 try{if(req.headers.host!==host){res.writeHead(403);return res.end('Invalid host');}const url=new URL(req.url,origin),pathname=decodeURIComponent(url.pathname),castRequest=/^\/api\/cast(?:\/end)?$/.test(pathname);
