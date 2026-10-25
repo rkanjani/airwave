@@ -28,13 +28,28 @@
     if(text.length>10*1024*1024)throw new Error('Guide is too large. Use XMLTV smaller than 10 MB.');
     if(/<!DOCTYPE|<!ENTITY/i.test(text))throw new Error('XML document declarations are not supported.');
     var doc=new Parser().parseFromString(text,'application/xml');if(doc.querySelector('parsererror')||!doc.querySelector('tv'))throw new Error('This is not a valid XMLTV guide.');
-    var programs=Object.create(null);Array.prototype.forEach.call(doc.querySelectorAll('programme'),function(p){var channel=p.getAttribute('channel'),start=xmlTime(p.getAttribute('start')),end=xmlTime(p.getAttribute('stop'));if(!channel||!isFinite(start)||!isFinite(end)||end<=start)return;var title=p.querySelector('title'),desc=p.querySelector('desc');if(!programs[channel])programs[channel]=[];programs[channel].push({start:start,end:end,title:title?title.textContent:'Untitled',description:desc?desc.textContent:''});});
+    var programs=Object.create(null);Array.prototype.forEach.call(doc.querySelectorAll('programme'),function(p){var channel=p.getAttribute('channel'),start=xmlTime(p.getAttribute('start')),end=xmlTime(p.getAttribute('stop'));if(!channel||!isFinite(start)||!isFinite(end)||end<=start)return;var title=p.querySelector('title'),desc=p.querySelector('desc'),icon=p.querySelector('icon');if(!programs[channel])programs[channel]=[];programs[channel].push({start:start,end:end,title:title?title.textContent:'Untitled',description:desc?desc.textContent:'',icon:icon?httpUrl(icon.getAttribute('src')):''});});
     Object.keys(programs).forEach(function(k){programs[k].sort(function(a,b){return a.start-b.start;});});
     if(!Object.keys(programs).length)throw new Error('No programmes with valid start and stop times were found.');return programs;
   }
   function currentProgram(programs,id,now){return (programs[id]||[]).find(function(p){return p.start<=now&&p.end>now;})||null;}
   function progress(program,now){return program?Math.max(0,Math.min(100,(now-program.start)/(program.end-program.start)*100)):0;}
   function filter(items,query,group,kind){query=(query||'').trim().toLocaleLowerCase();return items.filter(function(x){return (!kind||x.kind===kind)&&(!group||group==='All'||x.group===group)&&(!query||(x.name+' '+x.group).toLocaleLowerCase().indexOf(query)>=0);});}
+  // Provider playlists decorate names with separator hashes, superscript tags and shared prefixes ("NF - ", "SLING: ").
+  var SUP='ᴬᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴼᴾᴿᵀᵁⱽᵂᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻ⁰¹²³⁴⁵⁶⁷⁸⁹',PLAIN='ABDEGHIJKLMNOPRTUVWabcdefghijklmnoprstuvwxyz0123456789';
+  var QUALITY=/^(?:SD|HD|FHD|UHD|[48]K|HDR|HEVC|H\.?26[45]|RAW|\d{2,3}\s?FPS)$/i;
+  function badge(token){token=token.replace(/\s+/g,'');var fps=/^(\d+)fps$/i.exec(token);if(fps)return fps[1]+' fps';if(/^(?:raw)$/i.test(token))return 'Raw';return token.toUpperCase();}
+  function leadTag(name){var m=/^\s*([A-Za-z0-9]{2,6})\s*(?::|\||\s-\s)\s*\S/.exec(name||'');return m?m[1].toUpperCase():'';}
+  // A lead tag counts as a prefix when it starts at least three names and half of its group.
+  function commonTags(items){var counts=Object.create(null),sizes=Object.create(null),tags=new Set();items.forEach(function(x){var g=x.group||'',t=leadTag(x.name);sizes[g]=(sizes[g]||0)+1;if(t){var k=g+'\n'+t;counts[k]=(counts[k]||0)+1;}});Object.keys(counts).forEach(function(k){var g=k.slice(0,k.lastIndexOf('\n'));if(counts[k]>=3&&counts[k]*2>=sizes[g])tags.add(k.slice(k.lastIndexOf('\n')+1));});return tags;}
+  function cleanName(name,tags){var raw=String(name||'').trim(),badges=[],year='';
+    var text=raw.replace(/[ᴬ-ᵂᵃ-ᶻʰʲʳˡˢˣʷʸⁱⁿ⁰¹²³⁴-⁹ⱽ][ᴬ-ᵂᵃ-ᶻʰʲʳˡˢˣʷʸⁱⁿ⁰¹²³⁴-⁹ⱽ\s]*/g,function(run){run.trim().split(/\s+/).forEach(function(t){var plain=t.split('').map(function(c){var i=SUP.indexOf(c);return i<0?c:PLAIN[i];}).join('');if(plain)badges.push(badge(plain));});return ' ';});
+    text=text.replace(/^[\s#=*~|\-–—•]+|[\s#=*~|\-–—•]+$/g,'');
+    var t=leadTag(text);if(t&&tags&&tags.has(t))text=text.replace(/^\s*[A-Za-z0-9]{2,6}\s*(?::|\||\s-\s)\s*/,'');
+    text=text.replace(/\s*[([](?:19|20)\d{2}[)\]]\s*$/,function(m){year=m.replace(/\D/g,'');return '';});
+    var words=text.trim().split(/\s+/),tail=[];while(words.length>1&&QUALITY.test(words[words.length-1].replace(/[[\]()]/g,'')))tail.unshift(badge(words.pop().replace(/[[\]()]/g,'')));if(tail.length){text=words.join(' ');badges=badges.concat(tail);}
+    text=text.replace(/\s+/g,' ').trim();return {title:text||raw||'Untitled',year:year,badges:badges.filter(function(b,i){return badges.indexOf(b)===i;})};}
+  function groupLabel(group){return cleanName(group).title.replace(/\s*\|\s*/g,' · ');}
   function clock(seconds){seconds=Math.max(0,Math.floor(seconds||0));var h=Math.floor(seconds/3600),m=Math.floor(seconds%3600/60),s=String(seconds%60).padStart(2,'0');return h?h+':'+String(m).padStart(2,'0')+':'+s:m+':'+s;}
-  return {httpUrl:httpUrl,hash:hash,parseM3U:parseM3U,xmlTime:xmlTime,parseXMLTV:parseXMLTV,currentProgram:currentProgram,progress:progress,filter:filter,clock:clock};
+  return {httpUrl:httpUrl,hash:hash,parseM3U:parseM3U,xmlTime:xmlTime,parseXMLTV:parseXMLTV,currentProgram:currentProgram,progress:progress,filter:filter,clock:clock,commonTags:commonTags,cleanName:cleanName,groupLabel:groupLabel};
 });

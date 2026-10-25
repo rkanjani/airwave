@@ -38,7 +38,7 @@ Successful import is not proof that every stream/container/codec will play.
 | `package-lock.json` | Generated/committed | Reproducible dependency resolution; update through npm |
 | `platforms/` | First-party/config | Swift Apple shell, plist and hand-authored Xcode project/shared schemes |
 | `scripts/` | First-party tooling | Local server, unified checks, runtime allowlist, web release and Tizen packager |
-| `server/` | First-party | Private library registry, HLS rewriting and safe upstream requests |
+| `server/` | First-party | Private library registry, HLS rewriting, safe upstream requests and the tile-artwork cache |
 | `tests/` | Synthetic tests | Node tests for parsing, filtering, playback, native bridge, relay and release staging |
 
 Ignored local directories include `node_modules/` (dependencies), `build/` (Apple builds),
@@ -95,8 +95,17 @@ CI runs on GitHub Actions. There is no analytics, cloud-sync or Airwave account 
   entries and supplies a fallback name. Web input is assumed to be a trusted local export.
 - The web relay strips upstream URLs from snapshots and rewrites HLS playlists, keys,
   initialization maps and segment URLs to registered opaque resources. Dynamic resources
-  are bounded at 10,000; original catalog resources remain registered.
-- Apple snapshots expose `airwave-native://<id>` and omit source artwork URLs. The
+  are bounded at 10,000; original catalog resources remain registered. Catalog images
+  (`.img`) go through `server/artwork.cjs`: image content only, 2 MB each, a 64 MB in-memory
+  LRU, one shared fetch per image and a one-day memory of failures.
+- Tiles load artwork only near the viewport, six at a time, and show the cleaned name on a
+  flat tint until an image arrives or when it fails. XMLTV `<icon>` on the current
+  programme replaces a live tile's image, with the channel logo on a plate; those icon
+  URLs load directly from the guide's host.
+- Apple snapshots expose `airwave-native://<id>` for media and `airwave-art://logo/<id>` for
+  artwork; source artwork URLs stay native. A WKURLSchemeHandler fetches each image once,
+  downsamples it to 512 px and keeps it in Caches/Airwave/Artwork (7-day refresh, failures
+  retried after a day, folder trimmed past 200 MB). Reset clears that folder. The
   underlying catalog is AES-GCM encrypted in Application Support/Airwave; the key is
   stored in Keychain. This storage is separate from the browser view's preferences.
 - Plain M3U import is limited to 5 MB/10,000 entries. Its optional remembered library
@@ -175,8 +184,9 @@ catalogs, device exports, user-specific verification details or credential-beari
 4. Series episode resolution, provider refresh/login UI, automatic provider guide population, catch-up, DVR,
    multiview, DRM integration and cloud sync are not implemented.
 5. MKV/AVI and unsupported codecs need a different playback/remux/transcode strategy;
-   imported-library count is not a compatibility metric. Native artwork uses placeholders.
-6. Reset does not delete the external relay catalog or Apple encrypted file. The UI states
+   imported-library count is not a compatibility metric. Titles without catalog or guide
+   artwork have no poster source yet (a provider VOD-info or opt-in metadata lookup would be next).
+6. Reset clears the Apple artwork cache but does not delete the external relay catalog or Apple encrypted file. The UI states
    this boundary. A full remove-library flow would need its own implementation and tests.
 7. ATS permits HTTP media. Distribution needs a documented exception or narrower policy.
 8. First-party JS is compact and has no formatter/linter/typechecker. Current checks cover

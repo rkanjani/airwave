@@ -16,9 +16,9 @@ Read `docs/PROJECT.md` before changing platform boundaries, storage, packaging, 
 ## Where changes belong
 
 - `app/app.js`, `app/styles.css`: shared screens, copy, touch/remote/keyboard navigation.
-- `app/core.js`: M3U/XMLTV parsing, time calculations and filtering; tests in `tests/core.test.cjs`.
+- `app/core.js`: M3U/XMLTV parsing, display-name cleanup, time calculations and filtering; tests in `tests/core.test.cjs`.
 - `app/platform.js`, `app/player.js`, `app/cast.js`: JavaScript adapter contracts; tests in `tests/platform.test.cjs`, `tests/player.test.cjs` and `tests/sender.test.cjs`.
-- `server/library.cjs`, `server/network.cjs`: opaque media registry, HLS rewriting and outbound request boundaries; tests in `tests/library.test.cjs`. `server/cast.cjs`: cast tokens and the LAN listener; tests in `tests/cast.test.cjs`.
+- `server/library.cjs`, `server/network.cjs`, `server/artwork.cjs`: opaque media registry, HLS rewriting, outbound request boundaries and the tile-artwork cache; tests in `tests/library.test.cjs`. `server/cast.cjs`: cast tokens and the LAN listener; tests in `tests/cast.test.cjs`.
 - `platforms/apple/`: two shared Xcode schemes, Swift shell and plist. iOS-only casting stays in `#if os(iOS)` blocks; the Google Cast SDK is an exact-pinned Swift package on the iOS target only.
 - `scripts/runtime-files.cjs`: explicit web/Tizen release allowlist; update this when adding a runtime asset. Apple bundles the whole `app/` directory, whose contents the check verifies against that same list. The vendor bundle and license remain unmodified.
 
@@ -27,7 +27,7 @@ Read `docs/PROJECT.md` before changing platform boundaries, storage, packaging, 
 - Shared UI changes apply to every surface. Differences in playback, native controls and storage are documented platform behavior, not full codec parity.
 - Playback callbacks belong to their generation. Closing or switching invalidates old success, failure and time callbacks; cleanup releases the stream.
 - Private catalog JSON is version 2 with `name` and `items`. Each item has a stable `id`, `name`, HTTP(S) `url`, `kind` (`live` or `movie`), and optional grouping, logo, EPG and favorite fields. Keep the raw file outside Git and app bundles.
-- Web snapshots replace upstream URLs with `/api/media/` IDs; native snapshots use `airwave-native://` IDs. Provider credentials stay outside JavaScript for these two paths. Normal M3U Remember remains explicit opt-in, unencrypted local storage.
+- Web snapshots replace upstream URLs with `/api/media/` IDs; native snapshots use `airwave-native://` media IDs and `airwave-art://logo/<id>` artwork IDs. Provider credentials and image URLs stay outside JavaScript for these two paths. Display names are cleaned for tiles only; search, IDs and storage keep the original names. Normal M3U Remember remains explicit opt-in, unencrypted local storage.
 - `airwave.library` local-storage format is version 1. Favorites, history and favorite-seed keys are separate. Preserve existing IDs and storage readability when evolving imports.
 - Apple bridge messages are `{id, action, payload}`; replies resolve by ID and playback events by token. The native catalog is AES-GCM encrypted with a Keychain-held key.
 - The web relay is a local single-user process: loopback binding, Host/origin/session checks, registered upstream URLs and private-network rejection are part of its boundary. Public hosting requires a separate security design. The opt-in cast listener is the only LAN-facing path: one rotating, expiring token, its own Host check, registered media only, never upstream URLs.
@@ -69,8 +69,8 @@ The initial work centered on shared browsing and platform playback; there is not
 ## Gotchas
 
 - The Samsung manifest is still 0.1.0 while npm and Apple are 0.2.0. The version-parity expectation is a deliberate pending test, not a passing assertion. Resolve it in release work.
-- Native artwork uses placeholders. Series/episodes, automatic provider refresh, broad MKV/AVI compatibility and cloud sync are not implemented.
-- Reset clears browser preferences, not the relay's external catalog or the Apple encrypted file. Check the actual storage path before promising deletion.
+- Tiles show catalog logos/posters and XMLTV programme icons when present, otherwise the name on a flat tint. No poster lookup exists for titles without catalog artwork. Series/episodes, automatic provider refresh, broad MKV/AVI compatibility and cloud sync are not implemented.
+- Reset clears browser preferences and the Apple artwork cache, not the relay's external catalog or the Apple encrypted file. Check the actual storage path before promising deletion.
 - Apple uses an ATS HTTP-media exception. No certificate validation bypass is present. Review the exception for distribution.
 - Mocked AVPlay tests and successful compilation do not prove device playback. See `VERIFICATION.md`.
 - The Cast sender tests use a synthetic framework; real receiver playback needs a Cast device on the owner's network. The Cast SDK only loads in Chrome on a secure origin (`http://127.0.0.1` counts, `localhost` fails the relay's Host check), and the iOS target needs `@executable_path/Frameworks` to load the SDK.
