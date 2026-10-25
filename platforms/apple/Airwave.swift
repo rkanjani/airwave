@@ -73,6 +73,11 @@ final class AirwaveModel: NSObject, ObservableObject, WKScriptMessageHandler, WK
             guard let raw = self?.media[id]?["logo"] as? String, let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return nil }
             return url
         }
+        artwork.frameSource = { [weak self] id in
+            guard let item = self?.media[id], item["kind"] as? String == "live", let raw = item["url"] as? String, let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+            return url
+        }
+        artwork.frames.busy = { [weak self] in self?.playback != nil }
         view.navigationDelegate = self
         #if os(iOS)
         GCKCastContext.sharedInstance().sessionManager.add(self)
@@ -94,6 +99,8 @@ final class AirwaveModel: NSObject, ObservableObject, WKScriptMessageHandler, WK
             catch { reply(id, error: "The encrypted library could not be opened. Import it again from Settings.") }
         case "importLibrary": chooseLibrary(id)
         case "play":
+            // Playback gets the provider connection: a tile still being grabbed stops and waits.
+            artwork.frames.pause()
             guard let key = payload["id"] as? String else { return reply(id, error: "Missing media identifier.") }
             let raw = media[key]?["url"] as? String ?? payload["url"] as? String ?? ""
             guard let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return reply(id, error: "Unsupported media URL.") }
@@ -223,6 +230,7 @@ final class AirwaveModel: NSObject, ObservableObject, WKScriptMessageHandler, WK
             safe["url"] = "airwave-native://" + id
             // Artwork is optional. The web view gets an opaque artwork ID; provider URLs stay in native storage.
             safe["logo"] = artwork.lookup(id) != nil ? ArtworkSchemeHandler.address(id) : ""
+            if artwork.frameSource(id) != nil { safe["preview"] = ArtworkSchemeHandler.address(id, host: "frame") } else { safe.removeValue(forKey: "preview") }
             return safe
         }
         return ["version": 2, "private": true, "name": catalog?["name"] as? String ?? "My library", "items": items]
@@ -325,20 +333,24 @@ struct PrivateCatalogStore {
     func write(_ data: Data) throws { let sealed = try AES.GCM.seal(data, using: key()); guard let bytes = sealed.combined else { throw CocoaError(.fileWriteUnknown) }; let url = try file; try bytes.write(to: url, options: [.atomic]); try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path) }
 }
 
-// Tile artwork for the web view: airwave-art://logo/<id> resolves to the catalog's image in native code.
-// Images are downsampled once and kept in Caches; failures are remembered for a day.
+// Tile artwork for the web view: airwave-art://logo/<id> resolves to the catalog's image in native code, and
+// airwave-art://frame/<id> to a still of a live channel (FrameGrabber). Logos are downsampled once and kept in
+// Caches; failures are remembered for a day.
 @MainActor final class ArtworkSchemeHandler: NSObject, WKURLSchemeHandler {
     static let scheme = "airwave-art"
     private static let idCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~")
-    static func address(_ id: String) -> String { scheme + "://logo/" + (id.addingPercentEncoding(withAllowedCharacters: idCharacters) ?? "") }
+    static func address(_ id: String, host: String = "logo") -> String { scheme + "://" + host + "/" + (id.addingPercentEncoding(withAllowedCharacters: idCharacters) ?? "") }
     var lookup: (String) -> URL? = { _ in nil }
+    var frameSource: (String) -> URL? = { _ in nil }
+    let frames = FrameGrabber()
     private let cache = ArtworkCache()
     private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
     func webView(_ webView: WKWebView, start task: WKURLSchemeTask) {
         let key = ObjectIdentifier(task)
-        guard let url = task.request.url, url.host == "logo", case let id = String(url.path.dropFirst()), let source = lookup(id) else { return task.didFailWithError(URLError(.fileDoesNotExist)) }
+        guard let url = task.request.url, let host = url.host, case let id = String(url.path.dropFirst()),
+              let source = host == "logo" ? lookup(id) : host == "frame" ? frameSource(id) : nil else { return task.didFailWithError(URLError(.fileDoesNotExist)) }
         tasks[key] = Task { [weak self] in
-            let image = await self?.cache.image(id: id, source: source)
+            let image = host == "frame" ? await self?.frames.image(id: id, source: source) : await self?.cache.image(id: id, source: source)
             // A stopped task must not be answered.
             guard let self, self.tasks.removeValue(forKey: key) != nil else { return }
             guard let image else { return task.didFailWithError(URLError(.cannotDecodeContentData)) }
@@ -348,7 +360,7 @@ struct PrivateCatalogStore {
         }
     }
     func webView(_ webView: WKWebView, stop task: WKURLSchemeTask) { tasks.removeValue(forKey: ObjectIdentifier(task))?.cancel() }
-    func clear() { Task { await cache.clear() } }
+    func clear() { Task { await cache.clear() }; frames.clear() }
 }
 actor ArtworkCache {
     struct Image { let data: Data; let mime: String }
@@ -408,6 +420,252 @@ actor ArtworkCache {
         }.sorted { $0.2 < $1.2 }
         var total = entries.reduce(0) { $0 + $1.1 }
         while total > maxFolder * 4 / 5, !entries.isEmpty { let (url, size, _) = entries.removeFirst(); try? FileManager.default.removeItem(at: url); total -= size }
+    }
+}
+
+// Live tile stills for airwave-art://frame/<id>: one picture of the channel from a short-lived, silent mpv.
+// Providers often allow one or two connections per account, so grabs run one at a time with a gap between them
+// and never while a title plays (starting playback stops a running grab and requeues it). Stills stay fresh for
+// ten minutes in Caches/Airwave/Frames; a failed grab keeps the last still, or the logo, for half an hour.
+@MainActor final class FrameGrabber {
+    var busy: () -> Bool = { false }
+    private let fresh: TimeInterval = 600, failFor: TimeInterval = 1800, gap = 1.0, quiet = 15.0, maxQueue = 24
+    private final class Job {
+        let name: String, source: URL
+        var waiters: [UUID: CheckedContinuation<ArtworkCache.Image?, Never>] = [:]
+        var grab: MPVFrameGrab?
+        var requeue = false
+        init(name: String, source: URL) { self.name = name; self.source = source }
+    }
+    private var jobs: [String: Job] = [:], queue: [Job] = [], failed: [String: Date] = [:]
+    private var active: Job?, running = false, pruned = false
+    private var lastPlay = -Double.infinity, lastGrab = -Double.infinity
+    private var folder: URL? { try? FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("Airwave/Frames", isDirectory: true) }
+    func image(id: String, source: URL) async -> ArtworkCache.Image? {
+        let name = SHA256.hash(data: Data((id + "\n" + source.absoluteString).utf8)).map { String(format: "%02x", $0) }.joined()
+        if let file = folder?.appendingPathComponent(name + ".jpg"), age(file) < fresh, let data = try? Data(contentsOf: file) { return .init(data: data, mime: "image/jpeg") }
+        if let at = failed[name], Date().timeIntervalSince(at) < failFor { return saved(name) }
+        let job: Job
+        if let existing = jobs[name] { job = existing } else {
+            guard queue.count < maxQueue else { return saved(name) }
+            job = Job(name: name, source: source); jobs[name] = job; queue.append(job); pump()
+        }
+        let token = UUID()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { job.waiters[token] = $0 }
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.leave(job, token) }
+        }
+    }
+    // Playback is starting: a running grab gives up its connection and goes back to the front of the queue.
+    func pause() { lastPlay = PlaybackTiming.now; if let active, !active.requeue { active.requeue = true; active.grab?.cancel() } }
+    func clear() { if let folder { try? FileManager.default.removeItem(at: folder) }; failed = [:] }
+    // The tile left the screen: a queued grab is dropped and a running one stops.
+    private func leave(_ job: Job, _ token: UUID) {
+        guard let waiter = job.waiters.removeValue(forKey: token) else { return }
+        waiter.resume(returning: saved(job.name))
+        guard job.waiters.isEmpty, jobs[job.name] === job else { return }
+        jobs[job.name] = nil
+        queue.removeAll { $0 === job }
+        job.grab?.cancel()
+    }
+    private func pump() {
+        guard !running else { return }
+        running = true
+        Task { @MainActor in
+            prune()
+            while !queue.isEmpty {
+                if busy() { lastPlay = PlaybackTiming.now }
+                let wait = max(lastPlay + quiet, lastGrab + gap) - PlaybackTiming.now
+                if wait > 0 { try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)); continue }
+                let job = queue.removeFirst(), grab = MPVFrameGrab()
+                active = job; job.grab = grab
+                let still = await grab.run(job.source)
+                active = nil; job.grab = nil; lastGrab = PlaybackTiming.now
+                guard jobs[job.name] === job else { continue }
+                if job.requeue { job.requeue = false; queue.insert(job, at: 0); continue }
+                if let still, let folder {
+                    try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                    try? still.write(to: folder.appendingPathComponent(job.name + ".jpg"), options: .atomic)
+                    failed[job.name] = nil
+                } else if !grab.cancelled { failed[job.name] = Date() }
+                jobs[job.name] = nil
+                let result = saved(job.name)
+                job.waiters.values.forEach { $0.resume(returning: result) }
+                job.waiters = [:]
+            }
+            running = false
+        }
+    }
+    private func saved(_ name: String) -> ArtworkCache.Image? { (folder.flatMap { try? Data(contentsOf: $0.appendingPathComponent(name + ".jpg")) }).map { .init(data: $0, mime: "image/jpeg") } }
+    private func age(_ url: URL) -> TimeInterval { (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate).map { Date().timeIntervalSince($0) } ?? .infinity }
+    // Stills older than a day are no longer worth showing.
+    private func prune() {
+        guard !pruned, let folder, let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
+        pruned = true
+        for file in files where age(file) > 86_400 { try? FileManager.default.removeItem(at: file) }
+    }
+}
+// The bytes a still is decoded from, fetched the way the web relay does (server/preview.cjs): the newest segment of
+// a channel's HLS playlist, from a variant near tile size and with its init map, or the start of a raw MPEG-TS
+// stream. Requests run one after another and stop at 3 MB, so a grab holds the provider connection only briefly.
+enum FrameSource {
+    enum Next { case variant(URL), segment(URL, initMap: URL?) }
+    static func load(_ start: URL) async throws -> Data {
+        var url = start
+        for _ in 0..<3 {
+            let first = try await head(url, max: 3_000_000)
+            if first.data.first == 0x47 { return first.data }
+            switch try pick(String(decoding: first.data, as: UTF8.self), base: first.url) {
+            case .variant(let next): url = next
+            case .segment(let segment, let initMap):
+                var data = Data()
+                if let initMap { data = try await head(initMap, max: 1_000_000).data }
+                return data + (try await head(segment, max: 3_000_000).data)
+            }
+        }
+        throw URLError(.cannotParseResponse)
+    }
+    static func pick(_ text: String, base: URL) throws -> Next {
+        guard text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("#EXTM3U") else { throw URLError(.cannotParseResponse) }
+        let lines = text.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }
+        var variants: [(url: URL, bandwidth: Int, height: Int)] = [], map: URL?, encrypted = false, segment: (url: URL, map: URL?, encrypted: Bool)?
+        func resolve(_ value: String?) -> URL? { value.flatMap { URL(string: $0, relativeTo: base)?.absoluteURL } }
+        for (index, line) in lines.enumerated() where !line.isEmpty {
+            if line.hasPrefix("#EXT-X-STREAM-INF:") {
+                let video = attribute("CODECS", line).map { $0.range(of: "avc|hvc|hev|vp0?9|av01|mp4v", options: [.regularExpression, .caseInsensitive]) != nil } ?? true
+                if video, let url = resolve(lines[(index + 1)...].first { !$0.isEmpty && !$0.hasPrefix("#") }) {
+                    variants.append((url, Int(attribute("BANDWIDTH", line) ?? "") ?? 0, Int(attribute("RESOLUTION", line)?.split(separator: "x").last ?? "") ?? 0))
+                }
+            } else if line.hasPrefix("#EXT-X-KEY:") { encrypted = !line.contains("METHOD=NONE") }
+            else if line.hasPrefix("#EXT-X-MAP:") { map = resolve(attribute("URI", line)) }
+            else if !line.hasPrefix("#"), variants.isEmpty, let url = resolve(line) { segment = (url, map, encrypted) }
+        }
+        if !variants.isEmpty {
+            let sized = variants.filter { $0.height > 0 }.sorted { $0.height < $1.height }
+            return .variant((sized.isEmpty ? variants.min { $0.bandwidth < $1.bandwidth } : sized.first { $0.height >= 360 } ?? sized.last)!.url)
+        }
+        guard let segment, !segment.encrypted else { throw URLError(.cannotDecodeContentData) }
+        return .segment(segment.url, initMap: segment.map)
+    }
+    private static func attribute(_ name: String, _ line: String) -> String? {
+        guard let range = line.range(of: name + "=(\"[^\"]*\"|[^,]*)", options: .regularExpression) else { return nil }
+        return String(line[range].dropFirst(name.count + 1)).trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+    }
+    private static func head(_ url: URL, max: Int) async throws -> (data: Data, url: URL) {
+        var request = URLRequest(url: url); request.timeoutInterval = 10
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        defer { bytes.task.cancel() }
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+        var data = Data()
+        for try await byte in bytes { data.append(byte); if data.count >= max { break } }
+        return (data, http.url ?? url)
+    }
+}
+private final class MPVGrabRelay: @unchecked Sendable { weak var grab: MPVFrameGrab? }
+// One picture from one source: FrameSource fetches the bytes, then a windowless mpv with no network, audio,
+// subtitles or scripts decodes them from a temporary file and is closed as soon as it has a frame.
+@MainActor final class MPVFrameGrab {
+    private(set) var cancelled = false
+    private var handle: OpaquePointer?
+    private let relay = MPVGrabRelay()
+    private var fetch: Task<Data, Error>?
+    private var done: CheckedContinuation<Data?, Never>?
+    private var deadline: Task<Void, Never>?
+    private var restarted = false
+    func run(_ url: URL) async -> Data? {
+        let fetch = Task { try await FrameSource.load(url) }
+        self.fetch = fetch
+        guard let bytes = try? await fetch.value, !cancelled else { return nil }
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("airwave-frame-" + UUID().uuidString)
+        guard (try? bytes.write(to: file)) != nil else { return nil }
+        defer { try? FileManager.default.removeItem(at: file) }
+        return await decode(file)
+    }
+    private func decode(_ file: URL) async -> Data? {
+        guard !cancelled, let h = mpv_create() else { return nil }
+        let own: [(String, String)] = [("vo", "null"), ("ao", "null"), ("aid", "no"), ("sid", "no"), ("hwdec", "no"), ("untimed", "yes")]
+        for (name, value) in MPVEngine.options.filter({ !["vo", "gpu-api", "gpu-context", "hwdec"].contains($0.0) }) + own { mpv_set_option_string(h, name, value) }
+        guard mpv_initialize(h) >= 0 else { mpv_terminate_destroy(h); return nil }
+        handle = h; relay.grab = self
+        mpv_observe_property(h, 0, "time-pos", MPV_FORMAT_DOUBLE)
+        mpv_set_wakeup_callback(h, { context in
+            guard let context else { return }
+            let relay = Unmanaged<MPVGrabRelay>.fromOpaque(context).takeUnretainedValue()
+            Task { @MainActor in relay.grab?.drain() }
+        }, Unmanaged.passRetained(relay).toOpaque())
+        command(["loadfile", file.path])
+        deadline = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            if !Task.isCancelled { self?.finish(nil) }
+        }
+        return await withCheckedContinuation { done = $0 }
+    }
+    func cancel() { cancelled = true; fetch?.cancel(); finish(nil) }
+    private func finish(_ still: Data?) {
+        deadline?.cancel(); deadline = nil
+        if let h = handle {
+            handle = nil
+            mpv_set_wakeup_callback(h, nil, nil)
+            let relay = relay
+            DispatchQueue.global(qos: .utility).async { mpv_terminate_destroy(h); Unmanaged.passUnretained(relay).release() }
+        }
+        done?.resume(returning: still); done = nil
+    }
+    fileprivate func drain() {
+        while let h = handle, let event = mpv_wait_event(h, 0)?.pointee, event.event_id != MPV_EVENT_NONE {
+            switch event.event_id {
+            case MPV_EVENT_PLAYBACK_RESTART: restarted = true; capture()
+            case MPV_EVENT_PROPERTY_CHANGE: if restarted { capture() }
+            case MPV_EVENT_END_FILE, MPV_EVENT_SHUTDOWN: finish(nil)
+            default: continue
+            }
+        }
+    }
+    // screenshot-raw hands back the decoded frame as BGR0; it is scaled to the display aspect and kept as a JPEG.
+    private func capture() {
+        guard let h = handle else { return }
+        var args = ["screenshot-raw", "video"].map { (word: String) in UnsafePointer<CChar>(strdup(word)) } + [nil]
+        defer { args.forEach { free(UnsafeMutablePointer(mutating: $0)) } }
+        var node = mpv_node()
+        guard mpv_command_ret(h, &args, &node) >= 0 else { return }
+        defer { mpv_free_node_contents(&node) }
+        var w = 0, height = 0, stride = 0, format = "", bytes: Data?
+        guard node.format == MPV_FORMAT_NODE_MAP, let list = node.u.list?.pointee else { return }
+        for i in 0..<Int(list.num) {
+            guard let key = list.keys[i] else { continue }
+            let value = list.values[i]
+            switch String(cString: key) {
+            case "w": w = Int(value.u.int64)
+            case "h": height = Int(value.u.int64)
+            case "stride": stride = Int(value.u.int64)
+            case "format": format = value.u.string.map { String(cString: $0) } ?? ""
+            case "data": if value.format == MPV_FORMAT_BYTE_ARRAY, let array = value.u.ba?.pointee, let data = array.data { bytes = Data(bytes: data, count: array.size) }
+            default: break
+            }
+        }
+        guard format == "bgr0", w > 0, height > 0, stride >= w * 4, let bytes, bytes.count >= stride * height, let provider = CGDataProvider(data: bytes as CFData),
+              let frame = CGImage(width: w, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: stride, space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue),
+                                  provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent) else { return }
+        let dw = Double(int("video-params/dw") ?? w), dh = Double(int("video-params/dh") ?? height)
+        finish(Self.jpeg(frame, width: 640, height: max(2, Int((640 * dh / max(dw, 1)).rounded()))))
+    }
+    private func int(_ name: String) -> Int? { guard let handle else { return nil }; var value: Int64 = 0; return mpv_get_property(handle, name, MPV_FORMAT_INT64, &value) >= 0 && value > 0 ? Int(value) : nil }
+    private func command(_ args: [String]) {
+        guard let handle else { return }
+        var cargs = args.map { UnsafePointer<CChar>(strdup($0)) } + [nil]
+        defer { cargs.forEach { free(UnsafeMutablePointer(mutating: $0)) } }
+        mpv_command(handle, &cargs)
+    }
+    private static func jpeg(_ image: CGImage, width: Int, height: Int) -> Data? {
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        let out = NSMutableData()
+        guard let scaled = context.makeImage(), let destination = CGImageDestinationCreateWithData(out, UTType.jpeg.identifier as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(destination, scaled, [kCGImageDestinationLossyCompressionQuality: 0.8] as CFDictionary)
+        return CGImageDestinationFinalize(destination) ? out as Data : nil
     }
 }
 

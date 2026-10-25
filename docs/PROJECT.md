@@ -52,12 +52,14 @@ No fixture is a captured private provider response.
 Browser -> scripts/serve.cjs -> app/index.html -> platform/core/player/app
         -> /api/library -> server/library.cjs -> opaque library snapshot
         -> /api/media/<id> -> server/network.cjs -> user-selected provider
+        -> /api/preview/<id>.jpg -> server/preview.cjs -> newest HLS segment -> local ffmpeg (stdin) -> JPEG
         -> cast.js -> Google Cast sender (gstatic) -> Cast device
            -> direct source URL, or POST /api/cast -> server/cast.cjs token
 Cast device -> LAN listener (AIRWAVE_CAST=1) /cast/<token>/api/media/<id> -> provider
 
 Apple -> Airwave.swift -> bundled app/index.html -> webkit airwave messages
       -> native encrypted catalog + Keychain -> PlaybackPolicy -> AVPlayer or mpv (MPVKit)
+      -> airwave-art://frame/<id> -> FrameGrabber -> newest segment (URLSession) -> windowless mpv -> JPEG
       -> user-selected provider
 iOS   -> Google Cast iOS SDK -> Cast device -> user-selected provider
 
@@ -110,6 +112,20 @@ CI runs on GitHub Actions. There is no analytics, cloud-sync or Airwave account 
   are bounded at 10,000; original catalog resources remain registered. Catalog images
   (`.img`) go through `server/artwork.cjs`: image content only, 2 MB each, a 64 MB in-memory
   LRU, one shared fetch per image and a one-day memory of failures.
+- Live tile stills: each live item in a relay or native snapshot carries an opaque `preview`
+  (`/api/preview/<id>.jpg`, or `airwave-art://frame/<id>`). A still is one frame from the newest
+  segment of the channel's HLS playlist (a variant at least 360 lines tall where offered, with its
+  init map; encrypted segments are skipped), or from the first 3 MB of a raw MPEG-TS stream. The
+  relay fetches those bytes through `upstream()` and decodes them with a local ffmpeg reading stdin
+  (640 px JPEG, deinterlaced); Apple fetches with URLSession and decodes a temporary file with a
+  windowless, silent mpv (`vo=null`, `screenshot-raw`). Grabs run one at a time with a 1 s gap, abort
+  and requeue when playback starts, wait until 15 s after the last playback request, and give up a
+  queued or running grab when its tile request is cancelled. Stills stay fresh for 10 minutes (relay:
+  memory, 32 MB; Apple: Caches/Airwave/Frames, pruned after a day, cleared by Reset); failures are
+  remembered for 30 minutes and the last still, else the logo, is shown. Without ffmpeg the relay omits
+  `preview`, and static or demo libraries never grab. The page requests stills only for tiles that
+  stay at least 60% visible for 0.7 s, one at a time and never while the player is open, re-requests
+  them every 10 minutes, and shows the frame with the logo on a plate.
 - Tiles load artwork only near the viewport, six at a time, and show the name on a
   flat tint until an image arrives or when it fails. XMLTV `<icon>` on the current
   programme replaces a live tile's image, with the channel logo on a plate; those icon
@@ -165,6 +181,7 @@ no earlier Git history, tag, merged PR or removal record to reconstruct here.
 | 2026-10-24 | Apple playback no longer shows the web and native player screens together; focus returns to the row that started playback; search waits for a typing pause | `480afd1` |
 | 2026-10-24 | AVPlayer starts follow a provider redirect once instead of on each of its two initial playlist requests | `76cdad6` |
 | 2026-10-24 | Library tiles show catalog artwork and XMLTV programme images, with tinted fallbacks and viewport-limited loading | `69402e1` |
+| 2026-10-25 | Live tiles show a still of the channel, grabbed serially through the relay (ffmpeg) and natively on Apple (mpv), with the logo as fallback | this change |
 
 The initial import is evidence of the current implementation, not a claim that all its
 features were originally written in that commit. Pre-import observations are recorded
