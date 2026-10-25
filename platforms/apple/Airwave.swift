@@ -492,6 +492,11 @@ private final class MPVRelay: @unchecked Sendable { weak var engine: MPVEngine? 
         ("config", "no"), ("ytdl", "no"), ("terminal", "no"), ("input-default-bindings", "no"), ("input-media-keys", "no"),
         ("idle", "yes"), ("keep-open", "no"), ("network-timeout", "20"), ("demuxer-lavf-analyzeduration", "0.5"),
     ]
+    // Debanding smooths the stepped gradients of low-bitrate live channels at no measurable GPU cost.
+    // Upscaling stays on mpv's default lanczos: ewa_lanczossharp doubled GPU time with no visible gain.
+    // Launch with `-AirwaveDeband NO` to compare.
+    static let picture: [(String, String)] = UserDefaults.standard.object(forKey: "AirwaveDeband") != nil
+        && !UserDefaults.standard.bool(forKey: "AirwaveDeband") ? [] : [("deband", "yes")]
     init() {
         // MoltenVK otherwise prints its device report to the console for every new player.
         setenv("MVK_CONFIG_LOG_LEVEL", "1", 0)
@@ -501,7 +506,7 @@ private final class MPVRelay: @unchecked Sendable { weak var engine: MPVEngine? 
         guard let h = mpv_create() else { return }
         var wid = Int64(Int(bitPattern: Unmanaged.passUnretained(layer).toOpaque()))
         mpv_set_option(h, "wid", MPV_FORMAT_INT64, &wid)
-        for (name, value) in Self.options { mpv_set_option_string(h, name, value) }
+        for (name, value) in Self.options + Self.picture { mpv_set_option_string(h, name, value) }
         guard mpv_initialize(h) >= 0 else { mpv_terminate_destroy(h); return }
         for (name, format) in [("time-pos", MPV_FORMAT_DOUBLE), ("duration", MPV_FORMAT_DOUBLE), ("pause", MPV_FORMAT_FLAG), ("paused-for-cache", MPV_FORMAT_FLAG)] {
             mpv_observe_property(h, 0, name, format)

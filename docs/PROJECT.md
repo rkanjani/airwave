@@ -77,7 +77,9 @@ remembered for that title for the rest of the session. macOS draws a compact Swi
 (auto-hiding; the AirPlay route picker appears only under AVPlayer) over either engine's surface;
 iOS keeps AVPlayerViewController's controls for AVPlayer and shows the same compact bar, without volume
 or AirPlay, for mpv. Both engines sit behind one `PlaybackEngine` protocol, so the bridge contract and
-playback tokens are unchanged. Samsung remote keys are registered
+playback tokens are unchanged. mpv debands its output to smooth the stepped gradients of low-bitrate channels
+(launch with `-AirwaveDeband NO` to compare) and upscales with its default lanczos; AVPlayer, the browser
+and Samsung leave scaling to the system. Samsung remote keys are registered
 when the corresponding APIs exist. Search results start playback directly. Browser playback uses native video or HLS.js.
 Callbacks are guarded by playback generation so abandoned streams cannot restart.
 In Chrome, `app/cast.js` adds a Cast button once a device is found; while casting, the same
@@ -197,7 +199,7 @@ catalogs, device exports, user-specific verification details or credential-beari
    still need a remux/transcode strategy for those, and imported-library count is not a compatibility
    metric. mpv playback has been timed on public samples and a simulated provider on macOS and the iOS
    simulator only: provider channels, physical iPhone/iPad decode and battery cost, and HDR output are
-   unmeasured. mpv has no AirPlay or picture-in-picture (the app stops playback in the background, so
+   unmeasured. No engine adds super-resolution upscaling. mpv has no AirPlay or picture-in-picture (the app stops playback in the background, so
    neither engine offers PiP). App Store distribution of the static LGPL libraries needs a licensing
    review. Native artwork uses placeholders.
 6. Reset does not delete the external relay catalog or Apple encrypted file. The UI states
