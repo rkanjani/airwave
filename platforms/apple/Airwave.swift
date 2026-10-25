@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import WebKit
 import AVKit
 import CryptoKit
@@ -20,19 +21,11 @@ struct AirwaveApp: App {
             ZStack {
                 AirwaveWebView(model: model)
                 if let player = model.player {
-                    ZStack(alignment: .topLeading) {
-                        Color.black.ignoresSafeArea()
-                        AirwaveVideoView(player: player).ignoresSafeArea()
-                        HStack(spacing: 12) {
-                            Button { model.stop() } label: { Label("Back to Airwave", systemImage: "chevron.left").padding(12) }
-                                .buttonStyle(.borderedProminent).tint(.black.opacity(0.7))
-                            #if os(iOS)
-                            AirwaveCastButton().frame(width: 44, height: 44)
-                            #endif
-                        }.padding(24)
-                    }
+                    AirwavePlayerOverlay(player: player) { model.stop() }
+                        .id(ObjectIdentifier(player)).transition(.opacity)
                 }
             }
+            .animation(.easeOut(duration: 0.2), value: model.player.map(ObjectIdentifier.init))
             .preferredColorScheme(.dark)
             .onChange(of: scenePhase) { phase in if phase == .background { model.stop() } }
             #if os(macOS)
@@ -138,7 +131,13 @@ final class AirwaveModel: NSObject, ObservableObject, WKScriptMessageHandler, WK
             Task { @MainActor in
                 guard let self, self.playToken == token, let item else { return }
                 if item.status == .failed { self.emit("error", "This stream or codec cannot be played by Apple AVPlayer.", token: token); self.stop(notify: false) }
-                else if item.status == .readyToPlay, resume > 0, item.duration.seconds.isFinite, resume < item.duration.seconds { self.player?.seek(to: CMTime(seconds: resume, preferredTimescale: 600)) }
+                else if item.status == .readyToPlay, resume > 0 {
+                    // Seek before starting so a resumed movie buffers once, at the saved position.
+                    guard item.duration.seconds.isFinite, resume < item.duration.seconds else { self.player?.play(); return }
+                    self.player?.seek(to: CMTime(seconds: resume, preferredTimescale: 600)) { [weak self] _ in
+                        Task { @MainActor in if let self, self.playToken == token { self.player?.play() } }
+                    }
+                }
             }
         }
         playbackObserver = p.observe(\.timeControlStatus, options: [.new]) { [weak self] p, _ in
@@ -153,7 +152,7 @@ final class AirwaveModel: NSObject, ObservableObject, WKScriptMessageHandler, WK
             }
         }
         endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in Task { @MainActor in guard let self, self.playToken == token else { return }; self.emit("ended", token: token); self.stop(notify: false) } }
-        p.play()
+        if resume <= 0 { p.play() }
     }
     func stop(notify: Bool = true) {
         let oldToken = playToken
@@ -302,8 +301,136 @@ struct AirwaveWebView: UIViewRepresentable {
 #if os(macOS)
 struct AirwaveVideoView: NSViewRepresentable {
     let player: AVPlayer
-    func makeNSView(context: Context) -> AVPlayerView { let view = AVPlayerView(); view.player = player; view.controlsStyle = .floating; return view }
+    // AirwavePlayerControls replaces the system bar, which has no option to drop its overflow button.
+    func makeNSView(context: Context) -> AVPlayerView { let view = AVPlayerView(); view.player = player; view.controlsStyle = .none; return view }
     func updateNSView(_ view: AVPlayerView, context: Context) { if view.player !== player { view.player = player } }
+}
+struct AirPlayButton: NSViewRepresentable {
+    let player: AVPlayer
+    func makeNSView(context: Context) -> AVRoutePickerView {
+        let view = AVRoutePickerView(); view.player = player; view.isRoutePickerButtonBordered = false
+        view.setRoutePickerButtonColor(.white.withAlphaComponent(0.9), for: .normal); view.setRoutePickerButtonColor(.white, for: .normalHighlighted)
+        view.setRoutePickerButtonColor(.controlAccentColor, for: .active); view.setRoutePickerButtonColor(.controlAccentColor, for: .activeHighlighted)
+        return view
+    }
+    func updateNSView(_ view: AVRoutePickerView, context: Context) { if view.player !== player { view.player = player } }
+}
+
+// Mirrors one AVPlayer for the compact control bar. Commands go straight to the player;
+// AirwaveModel's own observers keep reporting playback to the web interface.
+@MainActor final class PlaybackState: ObservableObject {
+    let player: AVPlayer
+    @Published var playing = false
+    @Published var ready = false
+    @Published var time = 0.0
+    @Published var duration = 0.0
+    @Published var scrub: Double?
+    @Published var volume: Float { didSet { player.volume = volume; if volume > 0, muted { muted = false } } }
+    @Published var muted: Bool { didSet { player.isMuted = muted } }
+    private var timeObserver: Any?
+    private var observers: [NSKeyValueObservation] = []
+    var live: Bool { !(duration.isFinite && duration > 0) }
+    init(player: AVPlayer) {
+        self.player = player; volume = player.volume; muted = player.isMuted
+        observers.append(player.observe(\.timeControlStatus, options: [.initial, .new]) { [weak self] p, _ in
+            let playing = p.timeControlStatus != .paused
+            Task { @MainActor in self?.playing = playing }
+        })
+        observers.append(player.observe(\.currentItem?.status, options: [.initial, .new]) { [weak self] p, _ in
+            let ready = p.currentItem?.status == .readyToPlay, duration = p.currentItem?.duration.seconds ?? 0
+            Task { @MainActor in self?.ready = ready; self?.duration = duration }
+        })
+        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self, weak player] time in
+            Task { @MainActor in
+                guard let self, let player else { return }
+                self.time = time.seconds.isFinite ? time.seconds : 0
+                self.duration = player.currentItem?.duration.seconds ?? 0
+            }
+        }
+    }
+    deinit { if let timeObserver { player.removeTimeObserver(timeObserver) } }
+    func toggle() { if playing { player.pause() } else { player.play() } }
+    func seek(by delta: Double) { if ready, !live { seek(to: time + delta) } }
+    func seek(to target: Double) {
+        let next = max(0, min(duration - 0.5, target)); time = next; scrub = nil
+        player.seek(to: CMTime(seconds: next, preferredTimescale: 600))
+    }
+}
+
+struct AirwavePlayerControls: View {
+    @StateObject private var state: PlaybackState
+    @Binding var hovering: Bool
+    init(player: AVPlayer, hovering: Binding<Bool>) { _state = StateObject(wrappedValue: PlaybackState(player: player)); _hovering = hovering }
+    private var shown: Double { state.scrub ?? state.time }
+    private var volumeSymbol: String { state.muted || state.volume == 0 ? "speaker.slash.fill" : state.volume < 0.5 ? "speaker.wave.1.fill" : "speaker.wave.2.fill" }
+    var body: some View {
+        HStack(spacing: 4) {
+            ControlButton(symbol: state.playing ? "pause.fill" : "play.fill", label: state.playing ? "Pause" : "Play") { state.toggle() }
+                .keyboardShortcut(.space, modifiers: [])
+            if state.ready, !state.live {
+                ControlButton(symbol: "gobackward.10", label: "Back 10 seconds") { state.seek(by: -10) }.keyboardShortcut(.leftArrow, modifiers: [])
+                ControlButton(symbol: "goforward.10", label: "Forward 10 seconds") { state.seek(by: 10) }.keyboardShortcut(.rightArrow, modifiers: [])
+                Text(clock(shown)).frame(minWidth: 44, alignment: .trailing)
+                ThinTrack(value: shown / state.duration, label: "Position", text: clock(shown),
+                          change: { state.scrub = $0 * state.duration }, commit: { state.seek(to: $0 * state.duration) },
+                          step: { state.seek(by: $0 * 10) })
+                    .frame(width: 220).padding(.horizontal, 6)
+                Text("-" + clock(max(0, state.duration - shown))).frame(minWidth: 48, alignment: .leading)
+            } else if state.ready {
+                HStack(spacing: 6) { Circle().fill(Color.red).frame(width: 6, height: 6); Text("Live") }.padding(.horizontal, 8)
+            }
+            ControlButton(symbol: volumeSymbol, label: state.muted ? "Unmute" : "Mute") { state.muted.toggle() }
+            ThinTrack(value: state.muted ? 0 : Double(state.volume), label: "Volume", text: "\(Int((state.muted ? 0 : state.volume) * 100)) percent",
+                      change: { state.volume = Float($0) }, commit: { state.volume = Float($0) },
+                      step: { state.volume = max(0, min(1, state.volume + Float($0) * 0.1)) })
+                .frame(width: 56).padding(.trailing, 4)
+            AirPlayButton(player: state.player).frame(width: 28, height: 28).help("AirPlay").accessibilityLabel("AirPlay")
+        }
+        .font(.system(size: 12, weight: .medium)).monospacedDigit().foregroundStyle(.white)
+        .padding(.horizontal, 6).frame(height: 40)
+        .background(Capsule().fill(Color.black.opacity(0.72)))
+        .onHover { hovering = $0 }
+    }
+    private func clock(_ seconds: Double) -> String {
+        let s = Int(max(0, seconds.isFinite ? seconds : 0)), h = s / 3600, m = s / 60 % 60
+        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s % 60) : String(format: "%d:%02d", m, s % 60)
+    }
+}
+
+struct ControlButton: View {
+    let symbol: String, label: String, action: () -> Void
+    @State private var hovering = false
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 14, weight: .semibold)).frame(width: 28, height: 28)
+                .background(Circle().fill(.white.opacity(hovering ? 0.14 : 0))).contentShape(Circle())
+        }
+        .buttonStyle(PressStyle()).help(label).accessibilityLabel(label)
+        .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hovering = h } }
+    }
+}
+
+// A slim scrubber: the track thickens under the pointer and follows drags from any point.
+struct ThinTrack: View {
+    let value: Double, label: String, text: String
+    let change: (Double) -> Void, commit: (Double) -> Void, step: (Double) -> Void
+    @State private var hovering = false
+    var body: some View {
+        GeometryReader { geo in
+            let fraction = { (x: CGFloat) in Double(max(0, min(1, x / max(geo.size.width, 1)))) }
+            ZStack(alignment: .leading) {
+                Capsule().fill(.white.opacity(0.24))
+                Capsule().fill(.white).frame(width: geo.size.width * max(0, min(1, value.isFinite ? value : 0)))
+            }
+            .frame(height: hovering ? 6 : 4).frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { change(fraction($0.location.x)) }.onEnded { commit(fraction($0.location.x)) })
+        }
+        .frame(height: 24)
+        .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hovering = h } }
+        .accessibilityElement().accessibilityLabel(label).accessibilityValue(text)
+        .accessibilityAdjustableAction { direction in step(direction == .increment ? 1 : -1) }
+    }
 }
 #else
 struct AirwaveVideoView: UIViewControllerRepresentable {
@@ -312,3 +439,86 @@ struct AirwaveVideoView: UIViewControllerRepresentable {
     func updateUIViewController(_ view: AVPlayerViewController, context: Context) { if view.player !== player { view.player = player } }
 }
 #endif
+
+// Video plus Airwave's own chrome. On macOS the chrome hides after a few idle seconds of
+// playback and returns on pointer movement; iOS keeps AVPlayerViewController's controls.
+struct AirwavePlayerOverlay: View {
+    let player: AVPlayer
+    let close: () -> Void
+    @State private var appeared = false
+    @State private var active = true
+    @State private var hoveringControls = false
+    @State private var started = false
+    @State private var waiting = false
+    @State private var idle: Task<Void, Never>?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        let shown = appeared && active
+        ZStack {
+            Color.black.ignoresSafeArea()
+            AirwaveVideoView(player: player).ignoresSafeArea()
+            #if os(macOS)
+            Color.clear.contentShape(Rectangle()).onTapGesture { wake() }
+            if !started || waiting { ProgressView().controlSize(.large).transition(.opacity).allowsHitTesting(false) }
+            AirwavePlayerControls(player: player, hovering: $hoveringControls)
+                .opacity(shown ? 1 : 0).offset(y: shown || reduceMotion ? 0 : 10).allowsHitTesting(shown)
+                .frame(maxHeight: .infinity, alignment: .bottom).padding(.bottom, 24)
+            #endif
+            HStack(spacing: 12) {
+                BackButton(action: close)
+                #if os(iOS)
+                AirwaveCastButton().frame(width: 44, height: 44)
+                #endif
+            }
+                .opacity(shown ? 1 : 0).offset(x: shown || reduceMotion ? 0 : -10).allowsHitTesting(shown)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(20)
+        }
+        .animation(.easeOut(duration: 0.22), value: shown)
+        .onAppear { appeared = true; wake() }
+        .onDisappear { idle?.cancel() }
+        #if os(macOS)
+        .onContinuousHover { phase in if case .active = phase { wake() } }
+        .onReceive(player.publisher(for: \.timeControlStatus).receive(on: RunLoop.main)) { status in
+            if status == .playing { started = true }
+            waiting = status == .waitingToPlayAtSpecifiedRate; wake()
+        }
+        #endif
+    }
+    private func wake() {
+        #if os(macOS)
+        active = true; idle?.cancel()
+        idle = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            guard !Task.isCancelled, !hoveringControls, player.timeControlStatus != .paused else { return }
+            active = false; NSCursor.setHiddenUntilMouseMoves(true)
+        }
+        #endif
+    }
+}
+
+struct BackButton: View {
+    let action: () -> Void
+    @State private var hovering = false
+    #if os(macOS)
+    private let size: CGFloat = 36
+    #else
+    private let size: CGFloat = 44
+    #endif
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "chevron.left").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+                .frame(width: size, height: size).background(Circle().fill(Color.black.opacity(hovering ? 0.82 : 0.62))).contentShape(Circle())
+        }
+        .buttonStyle(PressStyle()).accessibilityLabel("Back to Airwave")
+        #if os(macOS)
+        .help("Back to Airwave").keyboardShortcut(.cancelAction)
+        .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hovering = h } }
+        #endif
+    }
+}
+
+struct PressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.scaleEffect(configuration.isPressed ? 0.9 : 1).animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+    }
+}

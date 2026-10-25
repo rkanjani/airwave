@@ -66,8 +66,9 @@ Samsung -> app/config.xml -> app/index.html -> player.js -> Samsung AVPlay
 `app/styles.css` switches between a labelled TV/desktop sidebar and, at 900px and below, a
 top bar plus five-tab bottom bar; screens of 1700px and wider scale the same layout for TV distance.
 The shared player shows a remote-scrubbable seek bar for movies and programme progress for live channels.
-The UI is shared; Apple video controls are native and Samsung remote keys are registered
-when the corresponding APIs exist. Browser playback uses native video or HLS.js.
+The UI is shared. macOS playback draws a compact SwiftUI control bar (auto-hiding, with an AirPlay
+route picker) over AVPlayerView; iOS uses AVPlayerViewController controls; Samsung remote keys are registered
+when the corresponding APIs exist. Search results start playback directly. Browser playback uses native video or HLS.js.
 Callbacks are guarded by playback generation so abandoned streams cannot restart.
 In Chrome, `app/cast.js` adds a Cast button once a device is found; while casting, the same
 controls drive the receiver and disconnecting resumes locally. iOS uses the Cast SDK's own
@@ -126,6 +127,7 @@ no earlier Git history, tag, merged PR or removal record to reconstruct here.
 | 2026-10-24 | Added the operational agent guide and product/history map | `8d00680` |
 | 2026-10-24 | Redesigned the shared interface; merged Guide into Live TV; added movie seek/resume and live-programme player controls | `efef441` |
 | 2026-10-24 | Added casting from Chrome and iOS, with an opt-in token-protected LAN cast listener for private-library items | `409c158` |
+| 2026-10-24 | Replaced the macOS system player bar with compact Airwave controls; search results play directly | `4402043` |
 
 The initial import is evidence of the current implementation, not a claim that all its
 features were originally written in that commit. Pre-import observations are recorded
@@ -143,7 +145,8 @@ in `VERIFICATION.md`; their private test data and screenshots are deliberately a
   loopback app, Host/origin/session checks and private-network upstream rejection are unchanged.
 - The relay is loopback-only and single-user. Turning it into a public multi-user service
   is a new authentication/storage/security project, not a host-binding tweak.
-- Native Apple controls use AVPlayerView/AVPlayerViewController. Initial development
+- Native Apple playback uses AVPlayerView/AVPlayerViewController; macOS hides the system bar
+  (`controlsStyle = .none`) because it cannot drop its overflow button. Initial development
   replaced a failing SwiftUI VideoPlayer integration before the baseline import; this
   pre-import observation is documented in the private development session, not Git history.
 - Vendored HLS is intentionally committed to support offline native/TV bundles. The
