@@ -29,7 +29,7 @@ struct AirwaveApp: App {
             ZStack {
                 AirwaveWebView(model: model)
                 if let playback = model.playback {
-                    AirwavePlayerOverlay(state: playback, favorite: model.favorite, toggleFavorite: { model.toggleFavorite() }) { model.stop() }
+                    AirwavePlayerOverlay(state: playback, favorite: model.favorite, toggleFavorite: { model.toggleFavorite() }, chooseSubtitleFile: { model.chooseSubtitles() }) { model.stop() }
                         .id(ObjectIdentifier(playback)).transition(.opacity)
                 }
             }
@@ -190,6 +190,7 @@ final class AirwaveModel: NSObject, ObservableObject, WKScriptMessageHandler, WK
             lastTimeEvent = PlaybackTiming.now
             emit("time", ["time": time, "duration": duration], token: token)
         case .externalPlayback(let active): externalPlayback = active
+        case .subtitles: break
         }
     }
     private func retry(from kind: EngineKind, result: String, began: Double, detail: String? = nil) {
@@ -243,6 +244,19 @@ final class AirwaveModel: NSObject, ObservableObject, WKScriptMessageHandler, WK
             let data = try Data(contentsOf: url, options: [.mappedIfSafe]); try loadCatalog(data); try store.write(data)
             reply(replyID, result: snapshot())
         } catch { catalog = previousCatalog; media = previousMedia; reply(replyID, error: "This library could not be imported or securely saved. Choose a valid Airwave library JSON file.") }
+    }
+    func chooseSubtitles() {
+        let types = ["srt", "vtt"].compactMap { UTType(filenameExtension: $0) }
+        #if os(macOS)
+        let panel = NSOpenPanel(); panel.allowedContentTypes = types; panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
+        panel.begin { [weak self] response in Task { @MainActor in if response == .OK, let url = panel.url { self?.playback?.loadSubtitles(from: url) } } }
+        #else
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: true)
+        let delegate = ImportDelegate { [weak self] url in if let url { self?.playback?.loadSubtitles(from: url) }; self?.documentDelegate = nil }
+        documentDelegate = delegate; picker.delegate = delegate
+        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene, let root = scene.windows.first(where: \.isKeyWindow)?.rootViewController else { return }
+        (root.presentedViewController ?? root).present(picker, animated: true)
+        #endif
     }
     private func chooseLibrary(_ id: String) {
         #if os(macOS)
@@ -678,7 +692,7 @@ enum EngineKind: String {
     var other: EngineKind { self == .mpv ? .avplayer : .mpv }
 }
 enum EngineEvent {
-    case status(playing: Bool, waiting: Bool), firstFrame, time(Double, Double), ended, failed(String), externalPlayback(Bool)
+    case status(playing: Bool, waiting: Bool), firstFrame, time(Double, Double), ended, failed(String), externalPlayback(Bool), subtitles([SubtitleTrack])
 }
 @MainActor protocol PlaybackEngine: AnyObject {
     var kind: EngineKind { get }
@@ -691,6 +705,10 @@ enum EngineEvent {
     func play()
     func pause()
     func seek(to seconds: Double)
+    // Subtitle tracks inside the stream, by the engine's own ID; nil turns them off.
+    func selectSubtitle(_ id: String?)
+    // Keeps stream subtitles above Airwave's control bar: the share of the picture's height to leave clear at the bottom.
+    func liftSubtitles(_ fraction: Double)
     func close()
 }
 private func finite(_ value: Double) -> Double { value.isFinite ? value : 0 }
@@ -740,6 +758,59 @@ enum PlaybackTiming {
     static func note(_ line: String) { if enabled { log.notice("\(line, privacy: .public)") } }
 }
 
+// Subtitles come from the stream (an engine's tracks) or from an SRT/WebVTT file the viewer loads, which
+// Airwave draws over either engine. Movies start on the stream track for the viewer's languages.
+struct SubtitleTrack: Identifiable, Equatable {
+    let id: String, language: String, title: String, forced: Bool
+    var label: String {
+        let name = language.isEmpty || Subtitles.code(language) == "und" ? "" : Locale.current.localizedString(forLanguageCode: language) ?? language.uppercased()
+        let extra = title.range(of: #"^(stream|track|subs?|subtitles?)[\s_-]*\d*$"#, options: [.regularExpression, .caseInsensitive]) == nil ? title : ""
+        var text = name.isEmpty ? (extra.isEmpty ? "Track \(id)" : extra) : extra.localizedCaseInsensitiveContains(name) ? extra : extra.isEmpty ? name : "\(name) · \(extra)"
+        if forced, !text.localizedCaseInsensitiveContains("forced") { text += " · Forced" }
+        return text
+    }
+}
+struct SubtitleCue { let start: Double, end: Double, text: String }
+enum SubtitleChoice: Equatable { case off, track(String), file }
+enum Subtitles {
+    static func code(_ language: String) -> String { Locale(identifier: language).language.languageCode?.identifier ?? language.lowercased() }
+    // The first track in the viewer's languages, full subtitles before forced-only ones; otherwise the first full track.
+    static func preferred(_ tracks: [SubtitleTrack], languages: [String] = Locale.preferredLanguages) -> SubtitleTrack? {
+        let wanted = languages.map(code)
+        func score(_ t: SubtitleTrack) -> Int { (wanted.firstIndex(of: code(t.language)) ?? wanted.count) * 2 + (t.forced ? 1 : 0) }
+        return tracks.enumerated().min { (score($0.element), $0.offset) < (score($1.element), $1.offset) }?.element
+    }
+    static func parse(_ text: String) -> [SubtitleCue] {
+        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+            .replacingOccurrences(of: "\n[ \t]+\n", with: "\n\n", options: .regularExpression)
+        var cues: [SubtitleCue] = []
+        for block in normalized.components(separatedBy: "\n\n") {
+            let lines = block.components(separatedBy: "\n")
+            guard let at = lines.firstIndex(where: { $0.contains("-->") }) else { continue }
+            let times = lines[at].components(separatedBy: "-->")
+            guard times.count == 2, let start = seconds(times[0]),
+                  let end = seconds(times[1].trimmingCharacters(in: .whitespaces).components(separatedBy: " ")[0]), end > start else { continue }
+            let body = lines[(at + 1)...].joined(separator: "\n")
+                .replacingOccurrences(of: "<[^>]*>", with: "", options: .regularExpression)
+                .replacingOccurrences(of: #"\{\\[^}]*\}"#, with: "", options: .regularExpression)
+                .replacingOccurrences(of: "&nbsp;", with: " ").replacingOccurrences(of: "&lt;", with: "<").replacingOccurrences(of: "&gt;", with: ">").replacingOccurrences(of: "&amp;", with: "&")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !body.isEmpty { cues.append(SubtitleCue(start: start, end: end, text: body)) }
+        }
+        return cues.sorted { $0.start < $1.start }
+    }
+    private static func seconds(_ value: String) -> Double? {
+        let parts = value.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".").split(separator: ":")
+        guard (2...3).contains(parts.count) else { return nil }
+        var total = 0.0
+        for part in parts { guard let number = Double(part) else { return nil }; total = total * 60 + number }
+        return total
+    }
+    static func text(at time: Double, in cues: [SubtitleCue]) -> String {
+        cues.filter { $0.start <= time && time < $0.end }.map(\.text).joined(separator: "\n")
+    }
+}
+
 @MainActor final class AVPlayerEngine: PlaybackEngine {
     let kind = EngineKind.avplayer
     let player = AVPlayer()
@@ -754,6 +825,7 @@ enum PlaybackTiming {
     // Drawn over the player's own picture while super-resolution is active.
     var overlay: CALayer? { upscaler?.layer }
     private var resolving: Task<Void, Never>?
+    private var legible: AVMediaSelectionGroup?
     var time: Double { finite(player.currentTime().seconds) }
     var duration: Double { finite(player.currentItem?.duration.seconds ?? 0) }
     var volume: Float { get { player.volume } set { player.volume = newValue } }
@@ -804,10 +876,31 @@ enum PlaybackTiming {
     }
     private func itemChanged(_ status: AVPlayerItem.Status, code: Int, resume: Double) {
         if status == .failed { return onEvent(.failed("AVFoundation \(code)")) }
+        if status == .readyToPlay, legible == nil, let item = player.currentItem { loadSubtitles(item) }
         guard status == .readyToPlay, resume > 0 else { return }
         // Seek before starting so a resumed movie buffers once, at the saved position.
         guard duration > 0, resume < duration else { return player.play() }
         player.seek(to: CMTime(seconds: resume, preferredTimescale: 600)) { [weak self] _ in Task { @MainActor in self?.player.play() } }
+    }
+    // Subtitles and closed captions are the item's legible options; AVPlayer draws the selected one.
+    private func loadSubtitles(_ item: AVPlayerItem) {
+        Task { [weak self] in
+            guard let group = try? await item.asset.loadMediaSelectionGroup(for: .legible), let self, self.player.currentItem === item, self.legible == nil else { return }
+            self.legible = group
+            // AVFoundation offers a forced-only copy of each track; like its own player, Airwave lists the full tracks.
+            self.onEvent(.subtitles(group.options.enumerated().compactMap { index, option in
+                option.hasMediaCharacteristic(.containsOnlyForcedSubtitles) ? nil
+                    : SubtitleTrack(id: String(index), language: option.extendedLanguageTag ?? option.locale?.identifier ?? "", title: option.displayName, forced: false)
+            }))
+        }
+    }
+    func liftSubtitles(_ fraction: Double) {
+        let position = Int(((1 - fraction) * 100).rounded()) - 5
+        player.currentItem?.textStyleRules = fraction > 0 ? AVTextStyleRule.textStyleRules(fromPropertyList: [kCMTextMarkupAttribute_OrthogonalLinePositionPercentageRelativeToWritingDirection as String: position]) : nil
+    }
+    func selectSubtitle(_ id: String?) {
+        guard let item = player.currentItem, let group = legible else { return }
+        item.select(id.flatMap(Int.init).flatMap { group.options.indices.contains($0) ? group.options[$0] : nil }, in: group)
     }
     private func advance(_ seconds: Double) {
         guard !started, seconds.isFinite, player.timeControlStatus == .playing else { return }
@@ -823,6 +916,7 @@ enum PlaybackTiming {
     func close() {
         resolving?.cancel(); resolving = nil
         onEvent = { _ in }
+        legible = nil
         upscaler?.close()
         observers.forEach { $0.invalidate() }; observers = []
         notices.forEach { NotificationCenter.default.removeObserver($0) }; notices = []
@@ -1025,7 +1119,7 @@ private final class MPVRelay: @unchecked Sendable { weak var engine: MPVEngine? 
         mpv_set_option(h, "wid", MPV_FORMAT_INT64, &wid)
         for (name, value) in Self.options + Self.picture { mpv_set_option_string(h, name, value) }
         guard mpv_initialize(h) >= 0 else { mpv_terminate_destroy(h); return }
-        for (name, format) in [("time-pos", MPV_FORMAT_DOUBLE), ("duration", MPV_FORMAT_DOUBLE), ("pause", MPV_FORMAT_FLAG), ("paused-for-cache", MPV_FORMAT_FLAG)] {
+        for (name, format) in [("time-pos", MPV_FORMAT_DOUBLE), ("duration", MPV_FORMAT_DOUBLE), ("pause", MPV_FORMAT_FLAG), ("paused-for-cache", MPV_FORMAT_FLAG), ("track-list/count", MPV_FORMAT_INT64)] {
             mpv_observe_property(h, 0, name, format)
         }
         handle = h; relay.engine = self
@@ -1043,6 +1137,22 @@ private final class MPVRelay: @unchecked Sendable { weak var engine: MPVEngine? 
     func play() { set("pause", false) }
     func pause() { set("pause", true) }
     func seek(to seconds: Double) { command(["seek", String(seconds), "absolute"]) }
+    // mpv (libass) draws text and picture subtitles from MKV, MP4 and the other containers it opens.
+    func selectSubtitle(_ id: String?) { if let handle { mpv_set_property_string(handle, "sid", id ?? "no") } }
+    // mpv measures subtitle margins against a 720-line screen; 22 is its default.
+    func liftSubtitles(_ fraction: Double) { if let handle { mpv_set_property_string(handle, "sub-margin-y", String(Int(22 + fraction * 720))) } }
+    private func readSubtitles() {
+        let count = Int(string("track-list/count") ?? "") ?? 0
+        onEvent(.subtitles((0..<count).compactMap { i in
+            guard string("track-list/\(i)/type") == "sub", let id = string("track-list/\(i)/id") else { return nil }
+            return SubtitleTrack(id: id, language: string("track-list/\(i)/lang") ?? "", title: string("track-list/\(i)/title") ?? "", forced: string("track-list/\(i)/forced") == "yes")
+        }))
+    }
+    private func string(_ name: String) -> String? {
+        guard let handle, let value = mpv_get_property_string(handle, name) else { return nil }
+        defer { mpv_free(value) }
+        return String(cString: value)
+    }
     func close() {
         onEvent = { _ in }
         guard let h = handle else { return }
@@ -1083,6 +1193,7 @@ private final class MPVRelay: @unchecked Sendable { weak var engine: MPVEngine? 
         case "duration": duration = finite(number ?? 0)
         case "pause": paused = flag ?? false; status()
         case "paused-for-cache": buffering = flag ?? false; status()
+        case "track-list/count": readSubtitles()
         default: break
         }
     }
@@ -1109,6 +1220,13 @@ private final class MPVRelay: @unchecked Sendable { weak var engine: MPVEngine? 
     @Published var scrub: Double?
     @Published var volume: Float = 1 { didSet { engine.volume = volume; if volume > 0, muted { muted = false } } }
     @Published var muted = false { didSet { engine.muted = muted } }
+    @Published private(set) var subtitleTracks: [SubtitleTrack] = []
+    @Published private(set) var subtitle = SubtitleChoice.off
+    @Published private(set) var subtitleFile: (name: String, cues: [SubtitleCue])?
+    @Published var notice: String?
+    var subtitleLift = 0.0 { didSet { if subtitleLift != oldValue { engine.liftSubtitles(subtitleLift) } } }
+    // Set once a default or the viewer has picked; later track-list updates keep that choice.
+    private var subtitleChosen = false
     var forward: (EngineEvent) -> Void = { _ in }
     private let liveHint: Bool
     var live: Bool { liveHint || !(duration.isFinite && duration > 0) }
@@ -1116,10 +1234,11 @@ private final class MPVRelay: @unchecked Sendable { weak var engine: MPVEngine? 
     func use(_ next: any PlaybackEngine) {
         engine.close(); engine = next
         playing = false; waiting = false; started = false; time = 0; duration = 0; scrub = nil
+        subtitleTracks = []; if subtitle != .file { subtitle = .off; subtitleChosen = false }
         attach()
     }
     private func attach() {
-        engine.volume = volume; engine.muted = muted
+        engine.volume = volume; engine.muted = muted; engine.liftSubtitles(subtitleLift)
         engine.onEvent = { [weak self] event in self?.handle(event) }
     }
     private func handle(_ event: EngineEvent) {
@@ -1127,9 +1246,27 @@ private final class MPVRelay: @unchecked Sendable { weak var engine: MPVEngine? 
         case .status(let playing, let waiting): self.playing = playing; self.waiting = waiting
         case .firstFrame: started = true
         case .time(let time, let duration): self.time = time; self.duration = duration
+        case .subtitles(let tracks):
+            subtitleTracks = tracks
+            if !subtitleChosen, !liveHint, let track = Subtitles.preferred(tracks) { chooseSubtitle(.track(track.id)) }
         default: break
         }
         forward(event)
+    }
+    func chooseSubtitle(_ choice: SubtitleChoice) {
+        subtitleChosen = true; subtitle = choice
+        if case .track(let id) = choice { engine.selectSubtitle(id) } else { engine.selectSubtitle(nil) }
+    }
+    func loadSubtitles(from url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource(); defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url), data.count <= 5_242_880 else { return show("This subtitle file could not be read. Use an SRT or WebVTT file under 5 MB.") }
+        let cues = Subtitles.parse(String(data: data, encoding: .utf8) ?? String(data: data, encoding: .windowsCP1252) ?? "")
+        guard !cues.isEmpty else { return show("This file has no SRT or WebVTT subtitles.") }
+        subtitleFile = (url.lastPathComponent, cues); chooseSubtitle(.file)
+    }
+    private func show(_ text: String) {
+        notice = text
+        Task { @MainActor [weak self] in try? await Task.sleep(nanoseconds: 4_000_000_000); if self?.notice == text { self?.notice = nil } }
     }
     func toggle() { if playing { engine.pause() } else { engine.play() } }
     func seek(by delta: Double) { if started, !live { seek(to: time + delta) } }
@@ -1259,6 +1396,8 @@ private let chromeButton: CGFloat = 44, chromeBar: CGFloat = 52
 struct AirwavePlayerControls: View {
     @ObservedObject var state: PlaybackState
     @Binding var hovering: Bool
+    @Binding var subtitlesOpen: Bool
+    let chooseSubtitleFile: () -> Void
     private var shown: Double { state.scrub ?? state.time }
     private var volumeSymbol: String { state.muted || state.volume == 0 ? "speaker.slash.fill" : state.volume < 0.5 ? "speaker.wave.1.fill" : "speaker.wave.2.fill" }
     var body: some View {
@@ -1279,6 +1418,7 @@ struct AirwavePlayerControls: View {
                     #endif
                     .padding(.horizontal, 6)
                 Text("-" + clock(max(0, state.duration - shown))).frame(minWidth: 48, alignment: .leading)
+                SubtitleButton(state: state, open: $subtitlesOpen, chooseFile: chooseSubtitleFile)
             } else if state.started {
                 HStack(spacing: 6) { Circle().fill(Color.red).frame(width: 6, height: 6); Text("Live") }.padding(.horizontal, 8)
             }
@@ -1345,6 +1485,94 @@ struct ThinTrack: View {
     }
 }
 
+// The subtitles popover: Off, the stream's own tracks, a loaded file, and Load a subtitle file….
+struct SubtitleButton: View {
+    @ObservedObject var state: PlaybackState
+    @Binding var open: Bool
+    let chooseFile: () -> Void
+    var overlay = false
+    var body: some View {
+        let symbol = state.subtitle == .off ? "captions.bubble" : "captions.bubble.fill", label = state.subtitle == .off ? "Subtitles off" : "Subtitles on"
+        Group {
+            if overlay { OverlayButton(symbol: symbol, label: label) { open.toggle() } }
+            else { ControlButton(symbol: symbol, label: label) { open.toggle() } }
+        }
+        .popover(isPresented: $open, arrowEdge: overlay ? .top : .bottom) {
+            SubtitleMenu(state: state, close: { open = false }, chooseFile: chooseFile).modifier(CompactPopover())
+        }
+    }
+}
+struct CompactPopover: ViewModifier {
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        if #available(iOS 16.4, *) { content.presentationCompactAdaptation(.popover) } else { content }
+        #else
+        content
+        #endif
+    }
+}
+struct SubtitleMenu: View {
+    @ObservedObject var state: PlaybackState
+    let close: () -> Void, chooseFile: () -> Void
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Subtitles").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.top, 4).padding(.bottom, 6)
+            SubtitleRow(label: "Off", on: state.subtitle == .off) { pick(.off) }
+            ForEach(state.subtitleTracks) { track in SubtitleRow(label: track.label, on: state.subtitle == .track(track.id)) { pick(.track(track.id)) } }
+            if let file = state.subtitleFile { SubtitleRow(label: file.name, on: state.subtitle == .file) { pick(.file) } }
+            if state.subtitleTracks.isEmpty, state.subtitleFile == nil {
+                Text("This title has no subtitles of its own.").font(.system(size: 12)).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.vertical, 6)
+            }
+            Divider().padding(.vertical, 6)
+            SubtitleRow(label: "Load a subtitle file…", on: false, muted: true) { close(); chooseFile() }
+        }
+        .padding(8).frame(width: 260)
+    }
+    private func pick(_ choice: SubtitleChoice) { state.chooseSubtitle(choice); close() }
+}
+struct SubtitleRow: View {
+    let label: String, on: Bool
+    var muted = false
+    let action: () -> Void
+    @State private var hovering = false
+    var body: some View {
+        Button(action: action) {
+            HStack {
+                Text(label).fontWeight(on ? .semibold : .regular).lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 12)
+                if on { Image(systemName: "checkmark").font(.system(size: 12, weight: .semibold)) }
+            }
+            .padding(.horizontal, 10).frame(height: chromeBar - 8).contentShape(Rectangle())
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(hovering ? 0.1 : 0)))
+            .foregroundStyle(muted ? .secondary : .primary)
+        }
+        .buttonStyle(.plain).accessibilityAddTraits(on ? .isSelected : [])
+        .onHover { hovering = $0 }
+    }
+}
+// Cues from a loaded file, timed to whichever engine plays; stream tracks are drawn by the engines themselves.
+struct SubtitleText: View {
+    @ObservedObject var state: PlaybackState
+    let lifted: Bool
+    var body: some View {
+        if state.subtitle == .file, let cues = state.subtitleFile?.cues {
+            GeometryReader { geo in
+                TimelineView(.periodic(from: .now, by: 0.1)) { _ in
+                    let text = Subtitles.text(at: state.engine.time, in: cues)
+                    if !text.isEmpty {
+                        Text(text).font(.system(size: max(15, min(geo.size.height * 0.045, 40)), weight: .semibold)).multilineTextAlignment(.center)
+                            .foregroundStyle(.white).shadow(color: .black.opacity(0.9), radius: 3, y: 1)
+                            .padding(.horizontal, 10).padding(.vertical, 3).background(RoundedRectangle(cornerRadius: 6).fill(Color.black.opacity(0.35)))
+                    }
+                }
+                .frame(width: geo.size.width * 0.9).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .padding(.bottom, lifted ? chromeBar + 44 : 36)
+            }
+            .animation(.easeOut(duration: 0.22), value: lifted).allowsHitTesting(false)
+        }
+    }
+}
+
 // Video plus Airwave's own chrome. With Airwave's controls (macOS, and mpv on iOS) the chrome hides
 // after a few idle seconds of playback and returns on pointer movement or a tap; iOS AVPlayer titles
 // keep AVPlayerViewController's controls.
@@ -1352,9 +1580,11 @@ struct AirwavePlayerOverlay: View {
     @ObservedObject var state: PlaybackState
     let favorite: Bool
     let toggleFavorite: () -> Void
+    let chooseSubtitleFile: () -> Void
     let close: () -> Void
     @State private var appeared = false
     @State private var active = true
+    @State private var subtitlesOpen = false
     @State private var hoveringControls = false
     @State private var idle: Task<Void, Never>?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -1366,14 +1596,19 @@ struct AirwavePlayerOverlay: View {
         #endif
     }
     var body: some View {
-        let shown = appeared && active
+        let shown = appeared && (active || subtitlesOpen)
         ZStack {
             Color.black.ignoresSafeArea()
             AirwaveVideoView(engine: state.engine).id(ObjectIdentifier(state.engine)).ignoresSafeArea()
+            SubtitleText(state: state, lifted: shown && ownControls)
+            if let notice = state.notice {
+                Text(notice).font(.system(size: 13, weight: .medium)).foregroundStyle(.white).padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(Capsule().fill(Color.black.opacity(0.8))).frame(maxHeight: .infinity, alignment: .top).padding(.top, 72).transition(.opacity)
+            }
             if ownControls {
                 Color.clear.contentShape(Rectangle()).onTapGesture { tapped() }
                 if !state.started || state.waiting { ProgressView().controlSize(.large).tint(.white).transition(.opacity).allowsHitTesting(false) }
-                AirwavePlayerControls(state: state, hovering: $hoveringControls)
+                AirwavePlayerControls(state: state, hovering: $hoveringControls, subtitlesOpen: $subtitlesOpen, chooseSubtitleFile: chooseSubtitleFile)
                     #if os(iOS)
                     .frame(maxWidth: 560).padding(.horizontal, 16)
                     #endif
@@ -1389,17 +1624,24 @@ struct AirwavePlayerOverlay: View {
                 AirwaveCastButton().frame(width: 44, height: 44)
                 #endif
                 Spacer()
+                // iOS AVPlayer titles use the system controls, so the subtitles button joins the top row.
+                if !ownControls, state.started, !state.live { SubtitleButton(state: state, open: $subtitlesOpen, chooseFile: chooseSubtitleFile, overlay: true) }
                 OverlayButton(symbol: favorite ? "heart.fill" : "heart", label: favorite ? "Remove from favorites" : "Add to favorites", action: toggleFavorite)
             }
                 .opacity(shown ? 1 : 0).offset(y: shown || reduceMotion ? 0 : -8).allowsHitTesting(shown)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).padding(20)
         }
+        .background(GeometryReader { geo in
+            let lift = shown && ownControls && geo.size.height > 0 ? (chromeBar + 36) / geo.size.height : 0
+            Color.clear.onAppear { state.subtitleLift = lift }.onChange(of: lift) { state.subtitleLift = $0 }
+        })
         .animation(.easeOut(duration: 0.22), value: shown)
         .onAppear { appeared = true; wake() }
         .onDisappear { idle?.cancel() }
         .onChange(of: state.playing) { _ in wake() }
         .onChange(of: state.waiting) { _ in wake() }
         .onChange(of: state.started) { _ in wake() }
+        .onChange(of: subtitlesOpen) { _ in wake() }
         #if os(macOS)
         .onContinuousHover { phase in
             switch phase {
@@ -1421,7 +1663,7 @@ struct AirwavePlayerOverlay: View {
         guard ownControls else { return }
         idle = Task { @MainActor in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-            guard !Task.isCancelled, !hoveringControls, state.playing, state.started else { return }
+            guard !Task.isCancelled, !hoveringControls, !subtitlesOpen, state.playing, state.started else { return }
             active = false
             #if os(macOS)
             if hidingCursor { NSCursor.setHiddenUntilMouseMoves(true) }

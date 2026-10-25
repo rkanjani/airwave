@@ -84,7 +84,20 @@ playback tokens are unchanged. mpv debands its output to smooth the stepped grad
 and Samsung leave scaling to the system. An opt-in (`-AirwaveSuperResolution YES`, macOS/iOS 26 devices) runs
 AVPlayer frames of up to 960×960 through VideoToolbox's low-latency super-resolution scaler and shows them on a
 display layer over the player's own picture; larger, HDR and AirPlay titles keep the plain picture. Samsung remote keys are registered
-when the corresponding APIs exist. Search results start playback directly. Browser playback uses native video or HLS.js.
+when the corresponding APIs exist. Search results start playback directly. Browser playback uses HLS.js for HLS wherever
+it runs, because browsers' own HLS (Safari, and Chrome since 142) does not list subtitle or audio renditions; a playlist
+HLS.js cannot fetch (no CORS) falls back to the browser's own HLS without track choices. Other files use native video.
+
+Subtitles come from the title itself or from a file. Movies start on the stream's subtitle track for the viewer's
+languages (full tracks before forced-only ones, else the first full track); live channels keep the stream's default.
+Each player has a captions button that opens a popover: Off, every subtitle track in the stream, a loaded file, and
+"Load a subtitle file…" (SRT or WebVTT, 5 MB). The web popover also lists audio renditions when there is more than one.
+Tracks come from HLS.js renditions, the browser's text tracks or Samsung AVPlay's TEXT tracks on the web side
+(`AirwaveCore.pickSubtitle`, `Player.subtitleTracks/selectSubtitle`), and from AVPlayer's legible media-selection group
+or mpv's `track-list` in the Apple apps (`SubtitleTrack`, `PlaybackState.chooseSubtitle`). The engines draw their own tracks;
+a loaded file's cues are drawn by the interface (`#subtitles` on the web, `SubtitleText` on Apple), lifted above the
+control bar while it shows. Apple lifts stream subtitles the same way (mpv `sub-margin-y`, AVPlayer text-style line
+position). Choices last for the current title only; nothing about subtitles is stored. Samsung has no file loading.
 Callbacks are guarded by playback generation so abandoned streams cannot restart.
 In Chrome, `app/cast.js` adds a Cast button once a device is found; while casting, the same
 controls drive the receiver and disconnecting resumes locally. iOS uses the Cast SDK's own
@@ -197,6 +210,7 @@ no earlier Git history, tag, merged PR or removal record to reconstruct here.
 | 2026-10-25 | macOS and iOS apps use the wave bands mark as their app icon | `8dea7f8` |
 | 2026-10-25 | Home shows scores for sports leagues followed in Settings; choosing a game plays the matching channel | `53310bf` |
 | 2026-10-25 | Live tiles show a still of the channel, grabbed serially through the relay (ffmpeg) and natively on Apple (mpv), with the logo as fallback | `843add1` |
+| 2026-10-25 | Movies show their own subtitle track by default; a captions popover turns subtitles off, switches track or loads an SRT/WebVTT file | `a116e7c` |
 
 The initial import is evidence of the current implementation, not a claim that all its
 features were originally written in that commit. Pre-import observations are recorded
@@ -275,6 +289,12 @@ catalogs, device exports, user-specific verification details or credential-beari
    or an iOS-side relay would be needed for HLS providers without CORS when casting from iOS.
 10. The iOS target links the Google Cast SDK (exact 4.8.6). Its Bluetooth/local-network usage and
    App Store privacy declarations need review before distribution.
+11. Subtitles have no online source. In October 2026 every free subtitle search service tried (OpenSubtitles, SubDL, Wyzie)
+   required an API key and Podnapisi no longer resolved, so finding subtitles for a title without its own tracks needs a
+   viewer-supplied key and a new outbound destination. Catalog items have no subtitle field yet. AVPlayer finishes the cue on screen
+   before an Off or a file choice takes effect; the browser reads subtitle files as UTF-8 (Apple falls back to Windows-1252);
+   ASS styling is dropped from loaded files. Subtitles on Samsung, Chrome casting and iOS AVPlayer (whose system controls
+   keep their own subtitles menu beside Airwave's button) are untested on hardware.
 
 ## Release ownership
 

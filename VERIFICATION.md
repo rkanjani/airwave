@@ -98,6 +98,13 @@ Each run measured 20 s after a 4 s warm-up, two interleaved runs per cell. Other
   - iOS keeps `AVPlayerViewController`'s controls, because the scaled picture is drawn in its content overlay.
 - Not verified: provider SD channels (including interlaced 576i), iPhone and iPad (both build, but the scaler cannot run in the simulator), battery and thermal cost, Intel Macs (the scaler reported support only on this Apple silicon Mac), and an actual AirPlay handover.
 
+## Subtitles (October 2026)
+
+- Browser (Chromium 152 pane): an HLS movie with en/el/fr/pt-BR WebVTT renditions started with English showing; the popover listed Off, the four languages, Load a subtitle file… and the audio renditions; French and Off switched the text tracks. A loaded SRT replaced the stream track and drew from playback time. The popover opens above its button on desktop and as a bottom sheet at 375 px. A playlist without CORS fell back to the browser's own HLS and played without track choices.
+- macOS (Debug build under a separate test bundle ID): an MKV with French then English (SDH) SRT tracks started on mpv with English drawn by libass; the popover switched to French and Off. An MP4 with French and English `mov_text` tracks started on AVPlayer with English; its forced-only copies are hidden. Both engines lifted stream subtitles above the control bar while it showed. A loaded SRT drew over AVPlayer. The Open panel itself was not driven (background automation could not reach it); the file was loaded through the same `PlaybackState.loadSubtitles` call.
+- iOS: both targets compile; the iOS popover (compact adaptation on iOS 16.4+) and the top-row button for AVPlayer titles were not run.
+- Not verified: Samsung AVPlay TEXT tracks on a TV, provider VOD with embedded subtitles, picture subtitles (PGS) on mpv, and right-to-left or non-Latin cue rendering.
+
 ## Remaining verification
 
 Physical Samsung installation and remote controls; Samsung firmware and codecs; signing and WGT packaging; physical iOS playback; public hosting; App Store distribution; series resolution; full codec coverage; provider refresh. The browser and Samsung players do not support MKV/AVI; on Apple they depend on mpv. Hardware playback is not proven by mocked AVPlay tests or successful Apple builds.

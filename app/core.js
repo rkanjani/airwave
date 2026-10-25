@@ -85,6 +85,30 @@
     var c=counts();tidy.forEach(function(x){if(c[x.label]>1){var extra=[x.t.quality].concat(x.t.tags,x.t.notes).filter(Boolean);if(extra.length)x.label+=' · '+extra.join(' ');}});
     c=counts();tidy.forEach(function(x){out[x.raw]=c[x.label]>1?x.raw:x.label;});return out;
   }
+  // Subtitle files: SRT and WebVTT become timed cues, with styling tags dropped. Cue text is shown as plain text.
+  function cueTime(value){var m=/^(?:(\d+):)?(\d{1,2}):(\d{2})[.,](\d{1,3})$/.exec(String(value||'').trim());return m?Number(m[1]||0)*3600+Number(m[2])*60+Number(m[3])+Number((m[4]+'00').slice(0,3))/1000:NaN;}
+  function parseSubtitles(text){
+    if(text.length>5*1024*1024)throw new Error('Subtitle file is too large. Use a file smaller than 5 MB.');
+    var cues=[];
+    text.replace(/^﻿/,'').replace(/\r\n?/g,'\n').split(/\n[ \t]*\n/).forEach(function(block){
+      var lines=block.split('\n'),at=-1;for(var i=0;i<lines.length;i++)if(lines[i].indexOf('-->')>=0){at=i;break;}if(at<0)return;
+      var times=lines[at].split('-->'),start=cueTime(times[0]),end=cueTime(times[1].trim().split(/\s+/)[0]);
+      var body=lines.slice(at+1).join('\n').replace(/<[^>]*>/g,'').replace(/\{\\[^}]*\}/g,'').replace(/&nbsp;/g,' ').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&').trim();
+      if(isFinite(start)&&isFinite(end)&&end>start&&body)cues.push({start:start,end:end,text:body});
+    });
+    if(!cues.length)throw new Error('This file has no SRT or WebVTT subtitles.');
+    return cues.sort(function(a,b){return a.start-b.start;});
+  }
+  function cueAt(cues,t){var lo=0,hi=cues.length;while(lo<hi){var mid=(lo+hi)>>1;if(cues[mid].start<=t)lo=mid+1;else hi=mid;}var out=[];for(var i=lo-1;i>=0&&i>=lo-8;i--)if(cues[i].end>t)out.unshift(cues[i].text);return out.join('\n');}
+  // Streams label tracks with two- or three-letter codes, or sometimes a name. The default track is the
+  // first in the viewer's own languages, preferring full subtitles over forced-only ones, else the first full track.
+  var languageCodes={eng:'en',english:'en',spa:'es',spanish:'es',fre:'fr',fra:'fr',french:'fr',ger:'de',deu:'de',german:'de',ita:'it',italian:'it',por:'pt',portuguese:'pt',rus:'ru',russian:'ru',jpn:'ja',japanese:'ja',chi:'zh',zho:'zh',chinese:'zh',kor:'ko',korean:'ko',ara:'ar',arabic:'ar',hin:'hi',hindi:'hi',dut:'nl',nld:'nl',dutch:'nl',swe:'sv',swedish:'sv',nor:'no',nob:'no',norwegian:'no',dan:'da',danish:'da',fin:'fi',finnish:'fi',pol:'pl',polish:'pl',tur:'tr',turkish:'tr',gre:'el',ell:'el',greek:'el',heb:'he',hebrew:'he',cze:'cs',ces:'cs',czech:'cs',hun:'hu',hungarian:'hu',rum:'ro',ron:'ro',romanian:'ro',tha:'th',vie:'vi',ind:'id',ukr:'uk',per:'fa',fas:'fa',may:'ms',msa:'ms'};
+  function languageCode(value){var s=String(value||'').trim().toLowerCase().split(/[-_ ]/)[0];return languageCodes[s]||s;}
+  function pickSubtitle(tracks,languages){
+    var wanted=(languages||[]).map(languageCode).filter(Boolean),best=-1,score=Infinity;
+    tracks.forEach(function(t,i){var rank=wanted.indexOf(languageCode(t.language||t.label)),s=(rank<0?wanted.length:rank)*2+(t.forced?1:0);if(s<score){score=s;best=i;}});
+    return best;
+  }
   function clock(seconds){seconds=Math.max(0,Math.floor(seconds||0));var h=Math.floor(seconds/3600),m=Math.floor(seconds%3600/60),s=String(seconds%60).padStart(2,'0');return h?h+':'+String(m).padStart(2,'0')+':'+s:m+':'+s;}
-  return {httpUrl:httpUrl,hash:hash,parseM3U:parseM3U,xmlTime:xmlTime,parseXMLTV:parseXMLTV,currentProgram:currentProgram,progress:progress,filter:filter,tidyName:tidyName,tidyGroups:tidyGroups,clock:clock};
+  return {httpUrl:httpUrl,hash:hash,parseM3U:parseM3U,xmlTime:xmlTime,parseXMLTV:parseXMLTV,currentProgram:currentProgram,progress:progress,filter:filter,tidyName:tidyName,tidyGroups:tidyGroups,clock:clock,parseSubtitles:parseSubtitles,cueAt:cueAt,languageCode:languageCode,pickSubtitle:pickSubtitle};
 });
