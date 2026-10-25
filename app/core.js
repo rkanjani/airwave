@@ -28,7 +28,7 @@
     if(text.length>10*1024*1024)throw new Error('Guide is too large. Use XMLTV smaller than 10 MB.');
     if(/<!DOCTYPE|<!ENTITY/i.test(text))throw new Error('XML document declarations are not supported.');
     var doc=new Parser().parseFromString(text,'application/xml');if(doc.querySelector('parsererror')||!doc.querySelector('tv'))throw new Error('This is not a valid XMLTV guide.');
-    var programs=Object.create(null);Array.prototype.forEach.call(doc.querySelectorAll('programme'),function(p){var channel=p.getAttribute('channel'),start=xmlTime(p.getAttribute('start')),end=xmlTime(p.getAttribute('stop'));if(!channel||!isFinite(start)||!isFinite(end)||end<=start)return;var title=p.querySelector('title'),desc=p.querySelector('desc');if(!programs[channel])programs[channel]=[];programs[channel].push({start:start,end:end,title:title?title.textContent:'Untitled',description:desc?desc.textContent:''});});
+    var programs=Object.create(null);Array.prototype.forEach.call(doc.querySelectorAll('programme'),function(p){var channel=p.getAttribute('channel'),start=xmlTime(p.getAttribute('start')),end=xmlTime(p.getAttribute('stop'));if(!channel||!isFinite(start)||!isFinite(end)||end<=start)return;var title=p.querySelector('title'),desc=p.querySelector('desc'),icon=p.querySelector('icon');if(!programs[channel])programs[channel]=[];programs[channel].push({start:start,end:end,title:title?title.textContent:'Untitled',description:desc?desc.textContent:'',icon:icon?httpUrl(icon.getAttribute('src')):''});});
     Object.keys(programs).forEach(function(k){programs[k].sort(function(a,b){return a.start-b.start;});});
     if(!Object.keys(programs).length)throw new Error('No programmes with valid start and stop times were found.');return programs;
   }
