@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The wave bands mark from app/assets/icon.svg. The launcher mask replaces its rounded tile. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="256"
+    android:viewportHeight="256">
+    <clip-path android:pathData="M0,0h256v256h-256z" />
+    <path
+        android:fillColor="#e4ae78"
+        android:pathData="M86 60L204 128L86 196Z"
+        android:strokeColor="#e4ae78"
+        android:strokeLineJoin="round"
+        android:strokeWidth="14" />
+    <path
+        android:pathData="M-93.8 83C-63.2 95 -39.4 95 -8.8 83S45.6 71 76.2 83S130.6 95 161.2 83S215.6 71 246.2 83M-77.5 113C-46.9 125 -23.1 125 7.5 113S61.9 101 92.5 113S146.9 125 177.5 113S231.9 101 262.5 113M-61.3 143C-30.7 155 -6.9 155 23.7 143S78.1 131 108.7 143S163.1 155 193.7 143S248.1 131 278.7 143M-45.1 173C-14.5 185 9.3 185 39.9 173S94.3 161 124.9 173S179.3 185 209.9 173S264.3 161 294.9 173"
+        android:strokeColor="#111111"
+        android:strokeWidth="9" />
+</vector>
