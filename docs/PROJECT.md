@@ -110,6 +110,7 @@ no earlier Git history, tag, merged PR or removal record to reconstruct here.
 | 2026-10-24 | Added one local/CI check, native bridge characterization, a pending version-parity test and allowlisted packaging | `f07a459` |
 | 2026-10-24 | Added the operational agent guide and product/history map | `8d00680` |
 | 2026-10-24 | Redesigned the shared interface; merged Guide into Live TV; added movie seek/resume and live-programme player controls | `efef441` |
+| 2026-10-24 | Replaced the macOS system player bar with compact Airwave controls; search results play directly | `4402043` |
 
 The initial import is evidence of the current implementation, not a claim that all its
 features were originally written in that commit. Pre-import observations are recorded
