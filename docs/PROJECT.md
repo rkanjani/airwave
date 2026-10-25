@@ -57,7 +57,8 @@ Browser -> scripts/serve.cjs -> app/index.html -> platform/core/player/app
 Cast device -> LAN listener (AIRWAVE_CAST=1) /cast/<token>/api/media/<id> -> provider
 
 Apple -> Airwave.swift -> bundled app/index.html -> webkit airwave messages
-      -> native encrypted catalog + Keychain -> AVPlayer -> user-selected provider
+      -> native encrypted catalog + Keychain -> PlaybackPolicy -> AVPlayer or mpv (MPVKit)
+      -> user-selected provider
 iOS   -> Google Cast iOS SDK -> Cast device -> user-selected provider
 
 Samsung -> app/config.xml -> app/index.html -> player.js -> Samsung AVPlay
@@ -66,8 +67,18 @@ Samsung -> app/config.xml -> app/index.html -> player.js -> Samsung AVPlay
 `app/styles.css` switches between a labelled TV/desktop sidebar and, at 900px and below, a
 top bar plus five-tab bottom bar; screens of 1700px and wider scale the same layout for TV distance.
 The shared player shows a remote-scrubbable seek bar for movies and programme progress for live channels.
-The UI is shared; Apple video controls are native and Samsung remote keys are registered
-when the corresponding APIs exist. Browser playback uses native video or HLS.js.
+The UI is shared. Apple playback picks an engine per title (`PlaybackPolicy` in `Airwave.swift`):
+AVPlayer for HLS and MP4/MOV/M4V, and for everything while AirPlay is in use; mpv (libmpv with FFmpeg,
+from MPVKit) for live channels given as raw `.ts` or with no extension, MKV, AVI and other containers.
+Live `.ts` channels now reach mpv as the raw URL; only AVPlayer gets the `.ts`→`.m3u8` provider rewrite.
+If the chosen engine fails before its first frame, or a first mpv attempt shows no frame within 8 s
+(live) or 15 s (movie), the title retries once on the other engine, and the engine that worked is
+remembered for that title for the rest of the session. macOS draws a compact SwiftUI control bar
+(auto-hiding; the AirPlay route picker appears only under AVPlayer) over either engine's surface;
+iOS keeps AVPlayerViewController's controls for AVPlayer and shows the same compact bar, without volume
+or AirPlay, for mpv. Both engines sit behind one `PlaybackEngine` protocol, so the bridge contract and
+playback tokens are unchanged. Samsung remote keys are registered
+when the corresponding APIs exist. Search results start playback directly. Browser playback uses native video or HLS.js.
 Callbacks are guarded by playback generation so abandoned streams cannot restart.
 In Chrome, `app/cast.js` adds a Cast button once a device is found; while casting, the same
 controls drive the receiver and disconnecting resumes locally. iOS uses the Cast SDK's own
@@ -81,7 +92,7 @@ Chromium path used the local relay.
 External runtime destinations are user-configured stream/logo/guide hosts and the
 public W3C-hosted Blender demo trailers. Opening the player in Chrome loads Google's Cast
 sender script from www.gstatic.com; the iOS build resolves the Google Cast SDK package from
-GitHub. Dependency restoration contacts npm.
+GitHub, and both Apple builds resolve MPVKit's binary frameworks from its GitHub releases. Dependency restoration contacts npm.
 CI runs on GitHub Actions. There is no analytics, cloud-sync or Airwave account service.
 
 ## Data contracts and ownership
@@ -110,6 +121,9 @@ CI runs on GitHub Actions. There is no analytics, cloud-sync or Airwave account 
   (`tests/cast.test.cjs`). The page receives only the LAN URL and content type, never upstream URLs.
 - iOS casting passes the native item's provider URL to the receiver from Swift; it is not
   exposed to JavaScript. The bridge `play` payload now also carries the item `kind`.
+- The player's top-right heart toggles the playing title's favorite. The bridge `play` payload
+  carries its current `favorite` state; the native overlay reports taps as a `favorite` playback
+  event, and JavaScript storage stays the only favorites store.
 - There is no cross-device sync or provider refresh UI. IDs must remain stable to retain
   favorites and movie progress; changing storage shape needs an explicit migration.
 
@@ -126,6 +140,8 @@ no earlier Git history, tag, merged PR or removal record to reconstruct here.
 | 2026-10-24 | Added the operational agent guide and product/history map | `8d00680` |
 | 2026-10-24 | Redesigned the shared interface; merged Guide into Live TV; added movie seek/resume and live-programme player controls | `efef441` |
 | 2026-10-24 | Added casting from Chrome and iOS, with an opt-in token-protected LAN cast listener for private-library items | `409c158` |
+| 2026-10-24 | Replaced the macOS system player bar with compact Airwave controls; search results play directly | `4402043` |
+| 2026-10-24 | Apple apps pick AVPlayer or mpv (MPVKit) per title, with one-time fallback, raw-TS live start-up and MKV/AVI playback | `532f99b` |
 | 2026-10-24 | Replaced the signal-arc icon with the wave bands mark across favicon, Samsung icon and in-app brand | `6c74acf` |
 
 The initial import is evidence of the current implementation, not a claim that all its
@@ -144,7 +160,16 @@ in `VERIFICATION.md`; their private test data and screenshots are deliberately a
   loopback app, Host/origin/session checks and private-network upstream rejection are unchanged.
 - The relay is loopback-only and single-user. Turning it into a public multi-user service
   is a new authentication/storage/security project, not a host-binding tweak.
-- Native Apple controls use AVPlayerView/AVPlayerViewController. Initial development
+- Apple playback runs two engines rather than one. AVPlayer keeps hardware decode, battery life and
+  AirPlay for what Apple handles; mpv covers raw MPEG-TS live streams, which AVPlayer refuses, and
+  containers it rejects. MPVKit was chosen over VLCKit for its first-party Swift package with one LGPL
+  product for macOS and iOS, a smaller FFmpeg-only stack, and mpv's tunable stream probing for live
+  start-up; VLCKit needs a third-party SPM wrapper, links MobileVLCKit statically on iOS too, and adds
+  VLC's network caching delay by default. The cost is size: unsigned Release builds grew from 9.8 MB
+  to 42.6 MB on iOS (arm64) and from 1.9 MB to 84 MB on macOS (universal). MPVKit's libraries are
+  static, so LGPL compliance relies on this public, relinkable source (see `NOTICE.md`).
+- AVPlayer surfaces use AVPlayerView/AVPlayerViewController; macOS hides the system bar
+  (`controlsStyle = .none`) because it cannot drop its overflow button. Initial development
   replaced a failing SwiftUI VideoPlayer integration before the baseline import; this
   pre-import observation is documented in the private development session, not Git history.
 - Vendored HLS is intentionally committed to support offline native/TV bundles. The
@@ -172,8 +197,13 @@ catalogs, device exports, user-specific verification details or credential-beari
    remain unverified. The Apple build commands compile without signing; no CI Apple job exists.
 4. Series episode resolution, provider refresh/login UI, automatic provider guide population, catch-up, DVR,
    multiview, DRM integration and cloud sync are not implemented.
-5. MKV/AVI and unsupported codecs need a different playback/remux/transcode strategy;
-   imported-library count is not a compatibility metric. Native artwork uses placeholders.
+5. Apple targets play MKV/AVI and raw MPEG-TS through mpv (MPVKit 1.0.0); the browser and Samsung
+   still need a remux/transcode strategy for those, and imported-library count is not a compatibility
+   metric. mpv playback has been timed on public samples and a simulated provider on macOS and the iOS
+   simulator only: provider channels, physical iPhone/iPad decode and battery cost, and HDR output are
+   unmeasured. mpv has no AirPlay or picture-in-picture (the app stops playback in the background, so
+   neither engine offers PiP). App Store distribution of the static LGPL libraries needs a licensing
+   review. Native artwork uses placeholders.
 6. Reset does not delete the external relay catalog or Apple encrypted file. The UI states
    this boundary. A full remove-library flow would need its own implementation and tests.
 7. ATS permits HTTP media. Distribution needs a documented exception or narrower policy.
