@@ -848,7 +848,12 @@ struct AirwavePlayerOverlay: View {
         .onChange(of: state.waiting) { _ in wake() }
         .onChange(of: state.started) { _ in wake() }
         #if os(macOS)
-        .onContinuousHover { phase in if case .active = phase { wake() } }
+        .onContinuousHover { phase in
+            switch phase {
+            case .active: wake()
+            case .ended: hoveringControls = false; wake(hideAfter: 0.6, hidingCursor: false)
+            }
+        }
         #endif
     }
     private func tapped() {
@@ -857,15 +862,16 @@ struct AirwavePlayerOverlay: View {
         #endif
         wake()
     }
-    private func wake() {
+    // A pointer leaving the player hides the chrome sooner than idling over it, and leaves the cursor alone.
+    private func wake(hideAfter delay: Double = 2.5, hidingCursor: Bool = true) {
         active = true; idle?.cancel()
         guard ownControls else { return }
         idle = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             guard !Task.isCancelled, !hoveringControls, state.playing, state.started else { return }
             active = false
             #if os(macOS)
-            NSCursor.setHiddenUntilMouseMoves(true)
+            if hidingCursor { NSCursor.setHiddenUntilMouseMoves(true) }
             #endif
         }
     }
