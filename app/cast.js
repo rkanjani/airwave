@@ -35,7 +35,7 @@
       var info=new C.media.MediaInfo(src.url,src.contentType),meta=new C.media.GenericMediaMetadata(),live=item.kind==='live';
       info.streamType=live?C.media.StreamType.LIVE:C.media.StreamType.BUFFERED;meta.title=self.title(item);if(src.logo)meta.images=[new C.Image(src.logo)];info.metadata=meta;
       var request=new C.media.LoadRequest(info);request.autoplay=true;request.currentTime=live?0:time||0;
-      self.active=true;self.preparing=true;self.lastTime=request.currentTime;self.device=session.getCastDevice().friendlyName||'your TV';self.emit('cast-started',self.device);self.emit('loading','Connecting to '+self.device+'…');
+      self.active=true;self.preparing=true;self.live=live;self.lastTime=request.currentTime;self.device=session.getCastDevice().friendlyName||'your TV';self.emit('cast-started',self.device);self.emit('loading','Connecting to '+self.device+'…');
       return session.loadMedia(request).then(function(){if(g===self.generation)self.preparing=false;return true;},function(){if(g!==self.generation)return false;self.ended();throw new Error(self.device+' could not play this title. Its format or source may not support casting.');});
     });
   };
@@ -47,7 +47,7 @@
       else if(r.playerState==='IDLE'){var session=this.context.getCurrentSession(),media=session&&session.getMediaSession(),reason=media&&media.idleReason;if(reason==='FINISHED'){this.release();this.emit('ended');}else if(reason==='ERROR'){this.ended();this.emit('notice',this.device+' stopped: the stream could not be played there.');}}}
   };
   Cast.prototype.toggle=function(){if(this.active&&!this.preparing)this.controller.playOrPause();};
-  Cast.prototype.seek=function(delta){if(!this.active||this.preparing)return;var r=this.remote;if(!r.duration){this.emit('notice','This live stream cannot be rewound.');return;}r.currentTime=Math.max(0,Math.min(r.duration-0.5,r.currentTime+delta));this.controller.seek();};
+  Cast.prototype.seek=function(delta){if(!this.active||this.preparing)return;var r=this.remote;if(!r.duration){if(this.live)this.emit('notice','This live stream cannot be rewound.');return;}r.currentTime=Math.max(0,Math.min(r.duration-0.5,r.currentTime+delta));this.controller.seek();};
   Cast.prototype.release=function(){this.generation++;this.active=false;this.preparing=false;if(this.relay){this.relay=false;this.fetch('/api/cast/end',{method:'POST',credentials:'same-origin'}).catch(function(){});}};
   // Stop the title on the receiver but keep the device connected for the next one.
   Cast.prototype.stopMedia=function(){if(!this.active)return;this.release();try{this.controller.stop();}catch(e){}};
