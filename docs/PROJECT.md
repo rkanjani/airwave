@@ -36,7 +36,7 @@ Successful import is not proof that every stream/container/codec will play.
 | `docs/` | Docs | This product, architecture, history and debt map |
 | `package.json` | Config | Commands, Node engine, license and exact dependencies; private prevents accidental npm publication |
 | `package-lock.json` | Generated/committed | Reproducible dependency resolution; update through npm |
-| `platforms/` | First-party/config | Swift Apple shell, plist and hand-authored Xcode project/shared schemes |
+| `platforms/` | First-party/config | Swift Apple shell, plist, app icon asset catalog and hand-authored Xcode project/shared schemes |
 | `scripts/` | First-party tooling | Local server, unified checks, runtime allowlist, web release and Tizen packager |
 | `server/` | First-party | Private library registry, HLS rewriting, safe upstream requests and the tile-artwork cache |
 | `tests/` | Synthetic tests | Node tests for parsing, filtering, playback, native bridge, relay and release staging |
@@ -81,7 +81,9 @@ iOS keeps AVPlayerViewController's controls for AVPlayer and shows the same comp
 or AirPlay, for mpv. Both engines sit behind one `PlaybackEngine` protocol, so the bridge contract and
 playback tokens are unchanged. mpv debands its output to smooth the stepped gradients of low-bitrate channels
 (launch with `-AirwaveDeband NO` to compare) and upscales with its default lanczos; AVPlayer, the browser
-and Samsung leave scaling to the system. Samsung remote keys are registered
+and Samsung leave scaling to the system. An opt-in (`-AirwaveSuperResolution YES`, macOS/iOS 26 devices) runs
+AVPlayer frames of up to 960×960 through VideoToolbox's low-latency super-resolution scaler and shows them on a
+display layer over the player's own picture; larger, HDR and AirPlay titles keep the plain picture. Samsung remote keys are registered
 when the corresponding APIs exist. Search results start playback directly. Browser playback uses native video or HLS.js.
 Callbacks are guarded by playback generation so abandoned streams cannot restart.
 In Chrome, `app/cast.js` adds a Cast button once a device is found; while casting, the same
@@ -94,7 +96,8 @@ It remains subject to browser CORS and mixed-content rules; the tested private-s
 Chromium path used the local relay.
 
 External runtime destinations are user-configured stream/logo/guide hosts and the
-public W3C-hosted Blender demo trailers. Opening the player in Chrome loads Google's Cast
+public W3C-hosted Blender demo trailers. Following a sports league in Settings adds ESPN's public
+scoreboard feed (site.api.espn.com) and its team logos (a.espncdn.com), loaded directly from every surface. Opening the player in Chrome loads Google's Cast
 sender script from www.gstatic.com; the iOS build resolves the Google Cast SDK package from
 GitHub, and both Apple builds resolve MPVKit's binary frameworks from its GitHub releases. Dependency restoration contacts npm.
 CI runs on GitHub Actions. There is no analytics, cloud-sync or Airwave account service.
@@ -146,6 +149,15 @@ CI runs on GitHub Actions. There is no analytics, cloud-sync or Airwave account 
   ("US · Sling") and falls back to tags, then the raw name, when two groups would read the same.
   Stored items, IDs, search and favorites still use playlist names; native and Cast playback
   receive the displayed title through the adapters' `title` option (`tests/core.test.cjs`).
+- Sports scores (`airwave.sportsLeagues`, an array of league IDs, empty by default; Reset clears it).
+  For each followed league Home fetches the public scoreboard while it is open, at most once a minute
+  (every 30 s while a game is live), through `AirwavePlatform.fetchText` (4 MB cap), and redraws only
+  the strip. `AirwaveSports.parseScoreboard` keeps teams, scores, status, start time and broadcaster
+  names; logos must be HTTPS. Choosing a game plays the best-ranked live channel from
+  `AirwaveSports.matchChannels`: a guide programme naming both teams near the game time, then a
+  channel named for both teams, then a channel whose displayed name is the broadcaster (whole name
+  over prefix; services ending in "+" never match). With no match a dialog says what was searched
+  (`tests/sports.test.cjs`). Matching is heuristic and has only been exercised with synthetic playlists.
 - Bridge request IDs correlate responses; playback tokens reject stale events. Default
   native timeout is 30 seconds, document picking 5 minutes (`tests/platform.test.cjs`).
 - Casting a relay item mints one cast token through the cookie-guarded `POST /api/cast`
@@ -181,6 +193,9 @@ no earlier Git history, tag, merged PR or removal record to reconstruct here.
 | 2026-10-24 | Apple playback no longer shows the web and native player screens together; focus returns to the row that started playback; search waits for a typing pause | `480afd1` |
 | 2026-10-24 | AVPlayer starts follow a provider redirect once instead of on each of its two initial playlist requests | `76cdad6` |
 | 2026-10-24 | Library tiles show catalog artwork and XMLTV programme images, with tinted fallbacks and viewport-limited loading | `69402e1` |
+| 2026-10-25 | Measured AVPlayer super-resolution; added it as an SD-only opt-in (`-AirwaveSuperResolution YES`) | `270181a`, `0136ca6` |
+| 2026-10-25 | macOS and iOS apps use the wave bands mark as their app icon | `8dea7f8` |
+| 2026-10-25 | Home shows scores for sports leagues followed in Settings; choosing a game plays the matching channel | `53310bf` |
 | 2026-10-25 | Live tiles show a still of the channel, grabbed serially through the relay (ffmpeg) and natively on Apple (mpv), with the logo as fallback | `843add1` |
 
 The initial import is evidence of the current implementation, not a claim that all its
@@ -243,7 +258,8 @@ catalogs, device exports, user-specific verification details or credential-beari
    still need a remux/transcode strategy for those, and imported-library count is not a compatibility
    metric. mpv playback has been timed on public samples and a simulated provider on macOS and the iOS
    simulator only: provider channels, physical iPhone/iPad decode and battery cost, and HDR output are
-   unmeasured. No engine adds super-resolution upscaling. mpv has no AirPlay or picture-in-picture (the app stops playback in the background, so
+   unmeasured. Super-resolution is opt-in, SD-only and measured on one Mac (see `VERIFICATION.md`); it is
+   off by default because its gain over AVPlayer's own scaling is modest and it adds edge halos. mpv has no AirPlay or picture-in-picture (the app stops playback in the background, so
    neither engine offers PiP). App Store distribution of the static LGPL libraries needs a licensing
    review.
    Titles without catalog or guide artwork have no poster source yet (a provider VOD-info or
