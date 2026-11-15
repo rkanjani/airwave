@@ -23,8 +23,18 @@
   function norm(s){return ' '+String(s||'').normalize('NFKD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim()+' ';}
   function teamKeys(t){var keys=[];[t.name,t.short,t.nickname].forEach(function(k){k=norm(k);if(k.trim().length>=3&&keys.indexOf(k)<0)keys.push(k);});return keys;}
   function mentions(haystack,keys){return keys.some(function(k){return haystack.indexOf(k)>=0;});}
+  // Basketball playlists often carry a stream per team ("NBA: Harbor City Herons"), which names only one side. A channel
+  // counts as a team stream when it names the full team, or a shorter team name plus a basketball word in its name or
+  // group, so "Sky Sports" never passes for the Chicago Sky. College nicknames ("Wildcats") are shared, so they never count alone.
+  var MARKERS={nba:['nba'],wnba:['wnba'],cbb:['cbb','ncaa','ncaab','ncaam','college basketball']};
+  function teamStream(league,t,shown,group){
+    if(!MARKERS[league])return false;var full=norm(t.name);if(full.trim().length>=3&&shown.indexOf(full)>=0)return true;
+    var marked=MARKERS[league].concat('basketball').map(norm).some(function(m){return (shown+group).indexOf(m)>=0;});
+    return marked&&mentions(shown,teamKeys(league==='cbb'?{name:t.name,short:t.short}:t));
+  }
   // Ranks live channels for a game: a guide programme naming both teams, then a channel named for both teams (event
-  // channels), then a channel named for the broadcaster. Streaming-only broadcasters ("ESPN+") never match a channel.
+  // channels), then, for basketball, a stream named for one of the teams, then a channel named for the broadcaster.
+  // Streaming-only broadcasters ("ESPN+") never match a channel.
   function matchChannels(game,channels,programs,options){
     options=options||{};programs=programs||{};var now=options.now||Date.now(),display=options.name||function(x){return x.name;},home=teamKeys(game.home),away=teamKeys(game.away),from=game.start-30*60000,until=Math.max(game.start+5*3600000,now);
     var nets=game.broadcasts.filter(function(n){return !/\+\s*$/.test(n);}).map(norm).filter(function(n){return n.trim().length>=2;}),out=[];
@@ -33,6 +43,7 @@
       if(x.kind!=='live')return;var score=0,shown=norm(display(x));
       (programs[x.epgId]||[]).forEach(function(p){if(p.end>from&&p.start<until&&both(p.title+' '+(p.description||'')))score=Math.max(score,p.start<=now&&p.end>now?110:100);});
       if(score<90&&(both(x.name)||both(display(x))))score=90;
+      if(score<70){var names=norm(x.name)+norm(display(x)),group=norm(x.group);if(teamStream(game.league,game.home,names,group)||teamStream(game.league,game.away,names,group))score=70;}
       if(score<60)nets.forEach(function(n){if(shown===n)score=Math.max(score,60);else if(shown.indexOf(n)===0)score=Math.max(score,30);});
       if(score)out.push({item:x,score:score,index:index});
     });
