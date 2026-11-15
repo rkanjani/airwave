@@ -155,8 +155,10 @@ CI runs on GitHub Actions. There is no analytics, cloud-sync or Airwave account 
   the strip. `AirwaveSports.parseScoreboard` keeps teams, scores, status, start time and broadcaster
   names; logos must be HTTPS. Choosing a game plays the best-ranked live channel from
   `AirwaveSports.matchChannels`: a guide programme naming both teams near the game time, then a
-  channel named for both teams, then a channel whose displayed name is the broadcaster (whole name
-  over prefix; services ending in "+" never match). With no match a dialog says what was searched
+  channel named for both teams, then, for NBA, WNBA and college basketball, a team stream named for
+  one side (the full team name, or a shorter name plus a league or "basketball" word in the channel
+  name or group; college nicknames never count alone), then a channel whose displayed name is the
+  broadcaster (whole name over prefix; services ending in "+" never match). With no match a dialog says what was searched
   (`tests/sports.test.cjs`). Matching is heuristic and has only been exercised with synthetic playlists.
 - Bridge request IDs correlate responses; playback tokens reject stale events. Default
   native timeout is 30 seconds, document picking 5 minutes (`tests/platform.test.cjs`).
