@@ -1,6 +1,8 @@
 import SwiftUI
 import Combine
+#if !os(tvOS)
 import WebKit
+#endif
 import AVKit
 import CryptoKit
 import Security
@@ -13,6 +15,9 @@ import Libmpv
 import GoogleCast
 #endif
 
+// Apple TV has no WebKit, so tvOS gets its own native interface (AirwaveTV.swift) over the shared engines,
+// catalog store and artwork cache below. Everything that drives the web view is macOS and iOS only.
+#if !os(tvOS)
 @main
 struct AirwaveApp: App {
     @StateObject private var model = AirwaveModel()
@@ -258,6 +263,7 @@ final class AirwaveModel: NSObject, ObservableObject, WKScriptMessageHandler, WK
     }
 }
 struct CastItem { let url: URL; let title: String; let live: Bool }
+#endif
 
 #if os(iOS)
 // Casting hands the receiver the item's real URL from native code; JavaScript only ever sees the opaque ID.
@@ -325,18 +331,26 @@ struct PrivateCatalogStore {
         guard SecItemAdd(insert as CFDictionary, nil) == errSecSuccess else { throw CocoaError(.fileWriteNoPermission) }
         return key
     }
+    // tvOS apps may keep files only in Caches, which the system can purge; AirwaveTV refetches from the saved source then.
+    #if os(tvOS)
+    private static let directory = FileManager.SearchPathDirectory.cachesDirectory
+    #else
+    private static let directory = FileManager.SearchPathDirectory.applicationSupportDirectory
+    #endif
     private var file: URL { get throws {
-        let base = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("Airwave", isDirectory: true)
+        let base = try FileManager.default.url(for: Self.directory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("Airwave", isDirectory: true)
         try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         return base.appendingPathComponent("library.encrypted")
     } }
     func read() throws -> Data? { let url = try file; guard FileManager.default.fileExists(atPath: url.path) else { return nil }; return try AES.GCM.open(AES.GCM.SealedBox(combined: Data(contentsOf: url)), using: key()) }
+    func clear() { if let url = try? file { try? FileManager.default.removeItem(at: url) } }
     func write(_ data: Data) throws { let sealed = try AES.GCM.seal(data, using: key()); guard let bytes = sealed.combined else { throw CocoaError(.fileWriteUnknown) }; let url = try file; try bytes.write(to: url, options: [.atomic]); try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path) }
 }
 
 // Tile artwork for the web view: airwave-art://logo/<id> resolves to the catalog's image in native code, and
 // airwave-art://frame/<id> to a still of a live channel (FrameGrabber). Logos are downsampled once and kept in
 // Caches; failures are remembered for a day.
+#if !os(tvOS)
 @MainActor final class ArtworkSchemeHandler: NSObject, WKURLSchemeHandler {
     static let scheme = "airwave-art"
     private static let idCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~")
@@ -363,6 +377,7 @@ struct PrivateCatalogStore {
     func webView(_ webView: WKWebView, stop task: WKURLSchemeTask) { tasks.removeValue(forKey: ObjectIdentifier(task))?.cancel() }
     func clear() { Task { await cache.clear() }; frames.clear() }
 }
+#endif
 actor ArtworkCache {
     struct Image { let data: Data; let mime: String }
     private let maxSource = 4_000_000, maxFolder = 200_000_000, fresh: TimeInterval = 7 * 86_400, failFor: TimeInterval = 86_400
@@ -845,14 +860,14 @@ enum PlaybackTiming {
 enum SuperResolution {
     static let requested = UserDefaults.standard.bool(forKey: "AirwaveSuperResolution")
     @MainActor static func make() -> (any Upscaler)? {
-        #if !targetEnvironment(simulator)
+        #if !targetEnvironment(simulator) && !os(tvOS)
         if requested, #available(macOS 26.0, iOS 26.0, *), VTLowLatencySuperResolutionScalerConfiguration.isSupported { return VideoToolboxUpscaler() }
         #endif
         return nil
     }
 }
 
-#if !targetEnvironment(simulator)
+#if !targetEnvironment(simulator) && !os(tvOS)
 // Pulls each decoded frame a little ahead of the player's clock, scales it, and queues it on a display layer that
 // follows the item's timebase, so the picture stays in sync with the sound and the system does the final fit.
 @available(macOS 26.0, iOS 26.0, *)
@@ -1037,6 +1052,7 @@ private final class MPVRelay: @unchecked Sendable { weak var engine: MPVEngine? 
     }
     func load(_ url: URL, resume: Double) {
         guard handle != nil else { return onEvent(.failed("mpv unavailable")) }
+        PlaybackTiming.note(String(format: "mpv load resume-s=%.1f", resume))
         command(["loadfile", url.absoluteString, "replace", "-1"] + (resume > 0 ? ["start=\(resume)"] : []))
         status()
     }
@@ -1146,7 +1162,7 @@ struct AirwaveWebView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView { let configuration = WKWebViewConfiguration(); configuration.setURLSchemeHandler(model.artwork, forURLScheme: ArtworkSchemeHandler.scheme); configuration.userContentController.add(model, name: "airwave"); let view = WKWebView(frame: .zero, configuration: configuration); model.configure(view); return view }
     func updateNSView(_ view: WKWebView, context: Context) {}
 }
-#else
+#elseif os(iOS)
 struct AirwaveWebView: UIViewRepresentable {
     let model: AirwaveModel
     func makeUIView(context: Context) -> WKWebView { let configuration = WKWebViewConfiguration(); configuration.allowsInlineMediaPlayback = true; configuration.setURLSchemeHandler(model.artwork, forURLScheme: ArtworkSchemeHandler.scheme); configuration.userContentController.add(model, name: "airwave"); let view = WKWebView(frame: .zero, configuration: configuration); view.scrollView.contentInsetAdjustmentBehavior = .never; model.configure(view); return view }
@@ -1247,6 +1263,8 @@ struct MetalSurface: UIViewRepresentable {
 }
 #endif
 
+// The compact chrome below serves macOS and iOS; Apple TV uses the system transport bar or its own overlay.
+#if !os(tvOS)
 #if os(macOS)
 private let chromeButton: CGFloat = 28, chromeBar: CGFloat = 40
 #else
@@ -1456,3 +1474,4 @@ struct PressStyle: ButtonStyle {
         configuration.label.scaleEffect(configuration.isPressed ? 0.9 : 1).animation(.easeOut(duration: 0.1), value: configuration.isPressed)
     }
 }
+#endif
