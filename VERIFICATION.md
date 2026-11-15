@@ -110,6 +110,11 @@ Each run measured 20 s after a 4 s warm-up, two interleaved runs per cell. Other
 
 - Checked at 1920×1080 with `?tv=1` in Chromium using arrow, OK and Back keys: the menu shows as the current page's name until Left from the first tile opens it over the dimmed page; Up/Down move through it; OK changes page; Right returns to the page and closes it; Back steps page → menu → Home. The focused tile lifts with a white ring while its row dims; section titles scroll under a solid top band instead of under the menu; Live TV keeps its channel/guide switch and filters; the player's focused buttons fill white and its text stays readable over a bright frame. A desktop with a mouse at the same size keeps the normal sidebar. Not seen on a Samsung TV.
 
+## Samsung Frame install (2026-11-14)
+
+- Built from this branch, signed with the owner's personal author profile and installed over the existing app on the Frame (QN85LS03BAFXZC, 10.0.0.251) through the developer connection; install and launch completed. Read back from the running page: TV mode on at 1920×1080, AVPlay present, the saved TV library loaded (65,484 titles: 31,025 live, 34,459 movies) instead of the demo.
+- Samsung voice: `webapis.voiceinteraction` exists but `getVersion()` throws SecurityError with this signing, so Airwave's voice commands stay off on the Frame (the adapter falls back quietly). The `voicecontrol` privilege is declared; it likely needs a package signed with a Samsung-issued certificate for this TV. Not yet tried.
+
 ## Remaining verification
 
 Physical Samsung installation, remote controls and voice; Apple TV device playback, dictation and Siri; Samsung firmware and codecs; signing and WGT packaging; physical iOS playback; public hosting; App Store distribution; series resolution; full codec coverage; provider refresh. The browser and Samsung players do not support MKV/AVI; on Apple they depend on mpv. Hardware playback is not proven by mocked AVPlay tests or successful Apple builds.

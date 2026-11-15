@@ -98,7 +98,8 @@ On Samsung, AVPlay starts once 4 s of media has buffered (Samsung's minimum; the
 progress. A failed start names its cause: the provider's stream limit, an expired or rejected account, a missing
 channel, a server or network failure, or a format the TV can't decode. For links shaped `/live/<user>/<pass>/<id>`
 (also `/movie/`, `/series/` or no prefix) the cause comes from the stream host's own `player_api.php` account report;
-otherwise from the HTTP status. A refusal that is certain is shown before AVPlay opens instead of after its 30 s timeout.
+otherwise from one request to the stream link. The check runs only after AVPlay's retries give up and the 1.5 s gap has
+passed, so it never holds a provider connection alongside the player.
 In Chrome, `app/cast.js` adds a Cast button once a device is found; while casting, the same
 controls drive the receiver and disconnecting resumes locally. iOS uses the Cast SDK's own
 button and expanded controls from the native player. macOS and Samsung do not cast.
