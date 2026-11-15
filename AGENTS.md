@@ -1,6 +1,6 @@
 # Working on Airwave
 
-Airwave is an independent, MIT-licensed media player for user-supplied playlists. One bundled web interface serves web, Samsung TV, iOS and macOS; playback and private storage have platform adapters. This is a development build, not a store release. No provider credentials or private catalogs ship with it.
+Airwave is an independent, MIT-licensed media player for user-supplied playlists. One bundled web interface serves web, Samsung TV, iOS and macOS; playback and private storage have platform adapters. Apple TV has no WebKit, so it gets a native SwiftUI interface over the same Apple engines, catalog store and `app/core.js`. This is a development build, not a store release. No provider credentials or private catalogs ship with it.
 
 Describe Airwave in its own terms. Keep competitor names, comparisons and inspiration attributions out of repository files and commit messages; preserve required third-party dependency and media license notices.
 
@@ -9,18 +9,20 @@ Read `docs/PROJECT.md` before changing platform boundaries, storage, packaging, 
 ## How it works
 
 1. `scripts/serve.cjs` serves `app/` on loopback; an optional `AIRWAVE_LIBRARY_PATH` loads a private catalog through `server/library.cjs`. With `ffmpeg` on PATH (or `AIRWAVE_FFMPEG`), `server/preview.cjs` grabs stills for live tiles. `AIRWAVE_CAST=1` adds a token-protected LAN listener (`server/cast.cjs`) for Cast receivers.
-2. `app/index.html` loads HLS.js, then `platform.js`, `core.js`, `sports.js`, `player.js`, and `app.js`. `AirwavePlatform.loadLibrary()` selects the native bridge, local relay or demo fallback.
+2. `app/index.html` loads HLS.js, then `platform.js`, `core.js`, `sports.js`, `player.js`, `cast.js`, `voice.js` and `app.js`. `AirwavePlatform.loadLibrary()` selects the native bridge, local relay or demo fallback.
 3. `app/app.js` owns navigation, imports, favorites and progress. `app/player.js` selects Apple native playback, Samsung AVPlay or browser video/HLS.js. In Chrome, `app/cast.js` hands the title to a Cast device and the same controls drive it.
 4. `platforms/apple/Airwave.swift` bundles that same interface, owns the native catalog, and plays each title on one of two engines behind its `PlaybackEngine` protocol: AVPlayer (HLS, MP4/MOV/M4V, and anything while AirPlay is in use) or mpv from MPVKit (raw `.ts` live channels, MKV/AVI and other containers). A failed start, or a first mpv attempt with no frame by its deadline, retries once on the other engine.
+5. `platforms/apple/AirwaveTV.swift` is the Apple TV app (`Airwave-tvOS`). It compiles with `Airwave.swift`, whose WebKit parts are `#if !os(tvOS)`, and reuses `PlaybackPolicy`, both engines, `PlaybackState`, `PrivateCatalogStore` and `ArtworkCache`. It runs the bundled `app/core.js` in JavaScriptCore (Foundation stands in for `URL`) for M3U parsing, Tidy names and spoken-title matching.
 
 ## Where changes belong
 
-- `app/app.js`, `app/styles.css`: shared screens, copy, touch/remote/keyboard navigation.
-- `app/core.js`: M3U/XMLTV parsing, display-name tidying, time calculations and filtering; tests in `tests/core.test.cjs`.
+- `app/app.js`, `app/styles.css`: shared screens, copy, touch/remote/keyboard navigation. On the wide layout, remote focus treats the sidebar and the page as separate columns (`moveFocus`, `nearest`); Back steps page → sidebar → Home → exit. TV mode (`html.tv`: Samsung, a screen 1700px+ without a fine pointer, or `?tv=1` to preview, kept for the browser session until `?tv=0`) collapses the sidebar to the current page's name in the corner and opens it over the dimmed page when focus enters it (`navOpen`), with larger tiles, titles and player scrims; every `.tv` rule sits in one block of `styles.css`.
+- `app/voice.js`: Samsung VoiceInteraction callbacks and browser speech recognition, turned into app commands that `voiceCommand` in `app.js` interprets; tests in `tests/voice.test.cjs`.
+- `app/core.js`: M3U/XMLTV parsing, display-name tidying, spoken-title matching (`matchSpoken`), time calculations and filtering. It must keep running in plain JavaScriptCore for Apple TV: no DOM except `parseXMLTV`'s injected parser; tests in `tests/core.test.cjs`.
 - `app/sports.js`: the followed-league list, scoreboard parsing and game-to-channel matching for the Home scores strip; tests in `tests/sports.test.cjs`.
 - `app/platform.js`, `app/player.js`, `app/cast.js`: JavaScript adapter contracts; tests in `tests/platform.test.cjs`, `tests/player.test.cjs` and `tests/sender.test.cjs`.
 - `server/library.cjs`, `server/network.cjs`, `server/artwork.cjs`, `server/preview.cjs`: opaque media registry, HLS rewriting, outbound request boundaries, the tile-artwork cache and live tile stills; tests in `tests/library.test.cjs`. `server/cast.cjs`: cast tokens and the LAN listener; tests in `tests/cast.test.cjs`.
-- `platforms/apple/`: two shared Xcode schemes, Swift shell, plist and the `AppIcon` asset catalog (rendered from `app/assets/icon.svg`: an inset tile for macOS, full-bleed for iOS). iOS-only casting stays in `#if os(iOS)` blocks; the Google Cast SDK is an exact-pinned Swift package on the iOS target only. MPVKit (exact 1.0.0, its LGPL `MPVKit` product, never `MPVKit-GPL`) is linked into both targets. Engine choice lives in `PlaybackPolicy`, fallback and timing in `AirwaveModel.begin`/`handle`, and the controls read `PlaybackState`, never an engine directly.
+- `platforms/apple/`: three shared Xcode schemes (`Airwave-tvOS` builds `AirwaveTV.swift` with `Info-tvOS.plist` and the layered `TVAssets.xcassets` icon and Top Shelf, rendered from the same mark), Swift shell, plist and the `AppIcon` asset catalog (rendered from `app/assets/icon.svg`: an inset tile for macOS, full-bleed for iOS). iOS-only casting stays in `#if os(iOS)` blocks; the Google Cast SDK is an exact-pinned Swift package on the iOS target only. MPVKit (exact 1.0.0, its LGPL `MPVKit` product, never `MPVKit-GPL`) is linked into both targets. Engine choice lives in `PlaybackPolicy`, fallback and timing in `AirwaveModel.begin`/`handle`, and the controls read `PlaybackState`, never an engine directly.
 - `scripts/runtime-files.cjs`: explicit web/Tizen release allowlist; update this when adding a runtime asset. Apple bundles the whole `app/` directory, whose contents the check verifies against that same list. The vendor bundle and license remain unmodified.
 
 ## Contracts to preserve
@@ -33,6 +35,8 @@ Read `docs/PROJECT.md` before changing platform boundaries, storage, packaging, 
 - Apple bridge messages are `{id, action, payload}`; replies resolve by ID and playback events by token, whichever engine plays. The native catalog is AES-GCM encrypted with a Keychain-held key. Engines receive provider URLs only from native code; the opt-in timing log (`-AirwavePlaybackTiming YES`) records engine, kind, container and seconds, never URLs.
 - Live tile stills cost the provider a connection, so every layer limits them: the page asks only for tiles that stay on screen, one at a time and never while the player is open; the relay and `FrameGrabber` run one grab at a time with a gap, abort and requeue a grab when playback starts, wait 15 s after playback, keep stills 10 minutes and failures 30. ffmpeg (relay) and mpv (Apple) decode bytes the grabber fetched, never a URL.
 - The web relay is a local single-user process: loopback binding, Host/origin/session checks, registered upstream URLs and private-network rejection are part of its boundary. Public hosting requires a separate security design. The opt-in cast listener is the only LAN-facing path: one rotating, expiring token, its own Host check, registered media only, never upstream URLs.
+- Airwave never records or sends audio itself: Samsung's assistant, the browser's speech service (Chrome sends audio to its provider; listening starts only from the mic button) and Apple's dictation do the listening, and Airwave receives only commands or a transcript. Apple builds hide the mic button, since a web view's microphone needs usage descriptions the app does not declare. Samsung needs the `voicecontrol` privilege in `config.xml`; `use.keypad.without.useraction` is false so passing through a text field with the remote does not pop the keyboard (OK opens it). Apple TV relies on the system keyboard's dictation and Siri's playback commands.
+- Apple TV keeps files only in Caches, which tvOS may purge: the encrypted catalog lives there, and its source link (it can hold credentials) is in the Keychain so the app can fetch it again. Favorites, history and Tidy names use the same keys as the web interface, in UserDefaults.
 - Scores are fetched from ESPN's public scoreboard feed only while at least one league is followed and Home is open; the request carries no library or user data. Keep it that way.
 - Private provider data stays out of tests and CI. Use reserved `.example` hosts and synthetic credentials; validate real playback manually only when authorized.
 
@@ -58,7 +62,10 @@ Apple builds are separate, require macOS/Xcode, and do not sign a distribution r
 ```sh
 xcodebuild -project platforms/apple/Airwave.xcodeproj -scheme Airwave-macOS -configuration Debug -derivedDataPath build/mac CODE_SIGNING_ALLOWED=NO
 xcodebuild -project platforms/apple/Airwave.xcodeproj -scheme Airwave-iOS -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build/ios CODE_SIGNING_ALLOWED=NO
+xcodebuild -project platforms/apple/Airwave.xcodeproj -scheme Airwave-tvOS -configuration Debug -sdk appletvsimulator -destination 'generic/platform=tvOS Simulator' -derivedDataPath build/tvos CODE_SIGNING_ALLOWED=NO
 ```
+
+The tvOS build needs Xcode's tvOS platform component (Xcode → Settings → Components); the SDK alone is not enough for `xcodebuild`. Without it, type-check the tvOS sources with `swiftc -typecheck` against `appletvsimulator` and MPVKit's `tvos-arm64_x86_64-simulator` Libmpv slice.
 
 ## Making the common change
 
@@ -85,6 +92,7 @@ The initial work centered on shared browsing and platform playback; there is not
 - Apple uses an ATS HTTP-media exception. No certificate validation bypass is present. Review the exception for distribution.
 - Mocked AVPlay tests and successful compilation do not prove device playback. See `VERIFICATION.md`.
 - The relay's 20-second upstream idle limit guards connecting, headers and playlist reads only. `pipeMedia` lifts it for media bodies, because a paused player or a Cast receiver with a full buffer stops reading a movie for longer than that.
+- Samsung removed `onsearch` and its search-term helpers from the VoiceInteraction reference in 2026; `voice.js` still answers them for older firmware but relies on title selection, navigation and playback commands. Spoken titles reach the app only for tiles on screen (`onrequestcontentcontext`), so `voiceCommand('title')` falls back to the whole library, then to Search.
 - The Cast sender tests use a synthetic framework; real receiver playback needs a Cast device on the owner's network. The Cast SDK only loads in Chrome on a secure origin (`http://127.0.0.1` counts, `localhost` fails the relay's Host check), and the iOS target needs `@executable_path/Frameworks` to load the SDK.
 
 ## Releasing

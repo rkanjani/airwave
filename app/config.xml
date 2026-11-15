@@ -5,8 +5,10 @@
   <tizen:profile name="tv-samsung"/>
   <tizen:privilege name="http://tizen.org/privilege/internet"/>
   <tizen:privilege name="http://tizen.org/privilege/tv.inputdevice"/>
+  <tizen:privilege name="http://developer.samsung.com/privilege/voicecontrol"/>
   <access origin="*" subdomains="true"/>
   <tizen:content-security-policy>default-src 'self'; script-src 'self' $WEBAPIS; style-src 'self' 'unsafe-inline'; img-src 'self' https: http: data:; media-src 'self' https: http: blob:; connect-src https: http:; object-src 'self'; base-uri 'self'</tizen:content-security-policy>
   <tizen:setting screen-orientation="landscape" context-menu="disable" background-support="disable" encryption="disable" install-location="auto" hwkey-event="enable"/>
   <tizen:metadata key="http://samsung.com/tv/metadata/prelaunch.support" value="false"/>
+  <tizen:metadata key="http://samsung.com/tv/metadata/use.keypad.without.useraction" value="false"/>
 </widget>
