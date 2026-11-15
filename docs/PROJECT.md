@@ -110,7 +110,7 @@ Chromium path used the local relay.
 
 External runtime destinations are user-configured stream/logo/guide hosts and the
 public W3C-hosted Blender demo trailers. Following a sports league in Settings adds ESPN's public
-scoreboard feed (site.api.espn.com) and its team logos (a.espncdn.com), loaded directly from every surface. Opening the player in Chrome loads Google's Cast
+scoreboard feed (site.api.espn.com; site.web.api.espn.com for international cricket) and its team logos (a.espncdn.com), loaded directly from every surface. Opening the player in Chrome loads Google's Cast
 sender script from www.gstatic.com; the iOS build resolves the Google Cast SDK package from
 GitHub, and both Apple builds resolve MPVKit's binary frameworks from its GitHub releases. Dependency restoration contacts npm.
 CI runs on GitHub Actions. There is no analytics, cloud-sync or Airwave account service.
@@ -166,7 +166,11 @@ CI runs on GitHub Actions. There is no analytics, cloud-sync or Airwave account 
   For each followed league Home fetches the public scoreboard while it is open, at most once a minute
   (every 30 s while a game is live), through `AirwavePlatform.fetchText` (4 MB cap), and redraws only
   the strip. `AirwaveSports.parseScoreboard` keeps teams, scores, status, start time and broadcaster
-  names; logos must be HTTPS. Choosing a game plays the best-ranked live channel from
+  names; logos must be HTTPS. Cricket (international, IPL, Big Bash) lists the home side first, keeps
+  runs and wickets ("156/8", "339 & 12/0d") without overs, and shows the result or match situation line
+  in place of broadcasters. ESPN files each international tour as its own series, so "International
+  cricket" reads ESPN's all-cricket header feed and keeps only events with an international class
+  (Tests, ODIs, T20Is, men's and women's). Choosing a game plays the best-ranked live channel from
   `AirwaveSports.matchChannels`: a guide programme naming both teams near the game time, then a
   channel named for both teams, then, for NBA, WNBA and college basketball, a team stream named for
   one side (the full team name, or a shorter name plus a league or "basketball" word in the channel
@@ -213,6 +217,7 @@ no earlier Git history, tag, merged PR or removal record to reconstruct here.
 | 2026-10-25 | Home shows scores for sports leagues followed in Settings; choosing a game plays the matching channel | `53310bf` |
 | 2026-11-14 | TV remote navigation reworked (column-aware focus, Back to the sidebar, distinct focus and selection, ten-foot sizing, channel up/down); Samsung voice commands and browser voice search; native Apple TV app with dictation and Siri playback | branch `claude/tv-ux-voice-input-cc90b0` |
 | 2026-10-25 | Live tiles show a still of the channel, grabbed serially through the relay (ffmpeg) and natively on Apple (mpv), with the logo as fallback | `843add1` |
+| 2026-11-14 | Cricket joins the followed sports: international cricket, IPL and Big Bash League | branch `claude/add-cricket-sport-fea782` |
 | 2026-11-14 | Samsung AVPlay starts after 4 s of buffered media and explains failed starts, including a provider's stream limit | `6d12d97` |
 
 The initial import is evidence of the current implementation, not a claim that all its
