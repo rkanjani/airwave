@@ -111,6 +111,7 @@ This produces a signed widget in `dist/`. Source ZIPs are not installable widget
 
 ## Features and boundaries
 
+- On Samsung TVs, a stream that won't play says why: the provider's limit of streams at once (and how many are in use, when the provider reports it), an expired or rejected account, a missing channel, or a provider or network failure.
 - Library browsing, title/group search, favorites, movie progress that resumes where you stopped, one-click playback from any tile, M3U and XMLTV import, remote/keyboard navigation.
 - Sports scores: follow leagues (NFL, NBA, MLB, NHL, WNBA, MLS, college football and basketball, Premier League, Champions League) in Settings to see their games at the top of Home. Choosing a game plays the channel that the guide, the channel names or the broadcaster point to. Scores come from ESPN's public scoreboard feed and load only while a league is followed.
 - Browser and Samsung playback share one control layer: movies get a seek bar the remote scrubs (left/right to choose, OK to jump, Back to cancel), skip 10 seconds and Start over; live channels show the current programme, what is next and a Guide shortcut.
