@@ -93,6 +93,14 @@ and Samsung leave scaling to the system. An opt-in (`-AirwaveSuperResolution YES
 AVPlayer frames of up to 960×960 through VideoToolbox's low-latency super-resolution scaler and shows them on a
 display layer over the player's own picture; larger, HDR and AirPlay titles keep the plain picture. Samsung remote keys are registered
 when the corresponding APIs exist. Search results start playback directly. Browser playback uses native video or HLS.js.
+Search folds case, accents, styled letters and punctuation ("espn 2" finds "ESPN2"), needs every typed word, ranks names that start
+with the query first, underlines the match and keeps the last six queries that led to playback (`airwave.recentSearches`). In TV mode
+(Samsung, `?tv=1`, or a large screen without a mouse) it shows an on-screen keyboard the remote drives, so the TV's own keyboard never opens.
+Multiview (`app/multiview.js`) plays up to four live channels in a grid or a focus layout (one big screen, the rest stacked), with a
+full-screen toggle. Sound follows focus. It opens from Live TV, from the player's Multiview button, or from Home's "Watch N games at
+once" when followed leagues have two or more live games with matching channels; screens show their game's score. The browser and
+Samsung play each screen in its own `<video>`/HLS.js (capped to the tile size); Apple draws an engine per screen natively under the
+transparent page at rectangles the page sends, with the same per-title engine choice and one-time fallback as single playback.
 Callbacks are guarded by playback generation so abandoned streams cannot restart.
 On Samsung, AVPlay starts once 4 s of media has buffered (Samsung's minimum; the default is 10 s) and shows buffering
 progress. A failed start names its cause: the provider's stream limit, an expired or rejected account, a missing
@@ -140,7 +148,7 @@ CI runs on GitHub Actions. There is no analytics, cloud-sync or Airwave account 
   memory, 32 MB; Apple: Caches/Airwave/Frames, pruned after a day, cleared by Reset); failures are
   remembered for 30 minutes and the last still, else the logo, is shown. Without ffmpeg the relay omits
   `preview`, and static or demo libraries never grab. The page requests stills only for tiles that
-  stay at least 60% visible for 0.7 s, one at a time and never while the player is open, re-requests
+  stay at least 60% visible for 0.7 s, one at a time and never while the player or multiview is open, re-requests
   them every 10 minutes, and shows the frame with the logo on a plate.
 - Tiles load artwork only near the viewport, six at a time, and show the name on a
   flat tint until an image arrives or when it fails. XMLTV `<icon>` on the current
@@ -163,7 +171,7 @@ CI runs on GitHub Actions. There is no analytics, cloud-sync or Airwave account 
   Stored items, IDs, search and favorites still use playlist names; native and Cast playback
   receive the displayed title through the adapters' `title` option (`tests/core.test.cjs`).
 - Sports scores (`airwave.sportsLeagues`, an array of league IDs, empty by default; Reset clears it).
-  For each followed league Home fetches the public scoreboard while it is open, at most once a minute
+  For each followed league Home (or multiview, for its captions and add sheet) fetches the public scoreboard while it is open, at most once a minute
   (every 30 s while a game is live), through `AirwavePlatform.fetchText` (4 MB cap), and redraws only
   the strip. `AirwaveSports.parseScoreboard` keeps teams, scores, status, start time and broadcaster
   names; logos must be HTTPS. Choosing a game plays the best-ranked live channel from
@@ -271,7 +279,8 @@ catalogs, device exports, user-specific verification details or credential-beari
 4. Physical Samsung/iPhone playback, remote behavior, certificates and store distribution
    remain unverified. The Apple build commands compile without signing; no CI Apple job exists.
 5. Series episode resolution, provider refresh/login UI, automatic provider guide population, catch-up, DVR,
-   multiview, DRM integration and cloud sync are not implemented.
+   DRM integration and cloud sync are not implemented. Multiview is verified in Chromium and the iOS simulator with the demo films only:
+   provider channels, Samsung decoder limits and physical Apple hardware are untested.
 6. Apple targets play MKV/AVI and raw MPEG-TS through mpv (MPVKit 1.0.0); the browser and Samsung
    still need a remux/transcode strategy for those, and imported-library count is not a compatibility
    metric. mpv playback has been timed on public samples and a simulated provider on macOS and the iOS

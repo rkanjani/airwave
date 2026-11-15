@@ -3,7 +3,7 @@
 html{font-size:16px}*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--ground);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased}body{overflow-x:hidden;font-size:.875rem}
 h1,h2,h3,p{margin:0}button,input,textarea,select{font:inherit;color:inherit}button{border:0;background:none;cursor:pointer;text-align:left;outline:0;transition:background-color .15s,color .15s,box-shadow .15s}
 button:focus,input:focus,textarea:focus,select:focus,[tabindex]:focus{outline:3px solid #fff;outline-offset:3px}button:disabled{opacity:.45;cursor:default}button svg{width:1.125rem;height:1.125rem;flex:none}
-.num{font-variant-numeric:tabular-nums}.visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+[hidden]{display:none!important}.num{font-variant-numeric:tabular-nums}.visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 
 /* Buttons: one inverted primary per view; everything else outlined. */
 .button{display:inline-flex;align-items:center;justify-content:center;gap:.625rem;min-height:2.75rem;padding:0 1.25rem;border:1px solid var(--control);border-radius:999px;font-size:.9375rem;white-space:nowrap}.button:hover{background:var(--raised)}
@@ -143,6 +143,46 @@ main{margin-left:var(--sidebar);min-height:100vh;min-width:0}
 .voice-button{flex:none;width:2.75rem;height:2.75rem;margin-right:-.75rem}.voice-button.listening{border-color:var(--accent);background:var(--accent);color:#000}.voice-button.listening svg{animation:pulse 1.2s ease-in-out infinite}@keyframes pulse{50%{opacity:.4}}
 .voice-hint{margin-top:.75rem;color:var(--faint);font-size:.875rem}.voice-hint[hidden]{display:none}
 
+/* Multiview: up to four screens on one grid. The white ring is focus; the white Sound pill marks the screen that is heard. */
+#multiview{position:fixed;z-index:20;top:0;right:0;bottom:0;left:0;background:#000}#multiview[hidden]{display:none}
+#mv-tiles{position:absolute;top:.5rem;right:.5rem;bottom:.5rem;left:.5rem;display:grid;gap:.5rem}
+.mv-tile{position:relative;min-width:0;min-height:0;border-radius:6px;overflow:hidden}.mv-tile[hidden]{display:none}
+.mv-tile video{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;background:#000}
+.mv-select{position:absolute;top:0;right:0;bottom:0;left:0;width:100%;border-radius:6px}.mv-select:focus{outline:3px solid #fff;outline-offset:-3px}.mv-tile.selected .mv-select:not(:focus){box-shadow:inset 0 0 0 2px rgba(255,255,255,.4)}
+.mv-sound,.mv-muted{position:absolute;top:.75rem;left:.75rem;display:inline-flex;align-items:center;justify-content:center;gap:.375rem;height:1.75rem;border-radius:999px}
+.mv-sound{padding:0 .75rem 0 .5625rem;background:#fff;color:#000;font-size:.8125rem;font-weight:600}.mv-sound svg{width:1rem;height:1rem}
+.mv-muted{width:1.75rem;background:rgba(0,0,0,.6);color:var(--muted)}.mv-muted svg{width:.9375rem;height:.9375rem}
+.mv-cap{position:absolute;left:.75rem;bottom:.75rem;max-width:calc(100% - 1.5rem);display:inline-flex;align-items:center;gap:.625rem;height:1.875rem;padding:0 .75rem;border-radius:999px;background:rgba(0,0,0,.6);font-size:.8125rem;white-space:nowrap;overflow:hidden}
+.mv-cap strong{min-width:0;font-weight:500;overflow:hidden;text-overflow:ellipsis}.mv-cap .num{font-weight:600}
+.mv-clock{display:inline-flex;align-items:center;gap:.375rem;color:var(--muted)}.mv-clock.live:before{content:"";flex:none;width:.4375rem;height:.4375rem;border-radius:50%;background:var(--accent)}
+.mv-status{position:absolute;top:50%;left:1rem;right:1rem;transform:translateY(-50%);text-align:center;font-size:1rem;font-weight:500;line-height:1.5;text-shadow:0 2px 10px #000}.mv-tile.failed .mv-status{color:var(--muted);font-size:.875rem}
+.mv-empty{display:flex;align-items:center;justify-content:center;gap:.625rem;min-height:0;border:1px dashed var(--control);border-radius:6px;color:var(--muted);font-size:.9375rem}.mv-empty:hover{background:var(--surface);color:#fff}
+#mv-ui{position:absolute;left:0;right:0;bottom:0;padding:2rem 2rem 1.75rem;background:rgba(0,0,0,.72);transition:opacity .2s}#mv-ui.hidden-controls{opacity:0;pointer-events:none}
+.mv-bar{display:flex;align-items:baseline;justify-content:space-between;gap:1rem}#mv-title{font-size:1.125rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#mv-hint{margin-top:.25rem;color:var(--muted);font-size:.8125rem}
+.mv-heading{min-width:0}#mv-count{flex:none;color:var(--faint);font-size:.8125rem}
+.mv-buttons{display:flex;align-items:center;flex-wrap:wrap;gap:.625rem;margin-top:1rem}.mv-buttons .spacer{flex:1}.mv-buttons .button{min-height:2.5rem;padding:0 1.125rem;font-size:.875rem}
+/* Apple draws the video natively under the page, so multiview's own surfaces turn transparent there. */
+.mv-native,.mv-native body,.mv-native #multiview,.mv-native .mv-tile{background:transparent}.mv-native #shell{visibility:hidden}
+.watch-all{display:inline-flex;align-items:center;gap:.5rem}.watch-all svg{width:1rem;height:1rem}.header-actions .button svg{width:1rem;height:1rem}
+
+/* The add sheet slides in from the right over multiview. */
+#modal.with-sheet{justify-content:flex-end;padding:0}.dialog.sheet{display:flex;flex-direction:column;width:34rem;height:100%;max-height:none;border-radius:0;overflow-y:auto}
+.sheet-tabs{margin-top:1.25rem}.sheet-tabs button{flex:1;text-align:center}#mv-sheet-body{margin-top:1rem;flex:1}.sheet .rows{grid-template-columns:minmax(0,1fr)}.sheet .row-side strong{display:block;color:#fff;font-size:.9375rem}
+.sheet .row.unmatched strong{color:var(--muted)}.dialog .searchbox{display:flex;height:3.25rem;margin:0 0 .75rem;font-weight:400;background:var(--raised)}.dialog .searchbox input{display:block;flex:1;width:auto;height:100%;padding:0;border:0;border-radius:0;background:none}.sheet .scores-note{margin-top:.25rem}.dialog.sheet .hint{margin-top:1.25rem}
+.sheet .keys{margin-bottom:1rem}.chips.recent{margin-bottom:0;flex-wrap:wrap}
+
+/* TV search: an on-screen keyboard for the remote, results updating beside it. */
+.tv-search{display:grid;grid-template-columns:27rem minmax(0,1fr);gap:2.75rem;align-items:start}.tv-search .search-results{margin-top:0}.tv-search .rows{grid-template-columns:minmax(0,1fr)}
+.query-display{display:flex;align-items:center;height:3.5rem;font-size:2rem;font-weight:600;letter-spacing:-.01em;white-space:nowrap;overflow:hidden}
+.query-display:after{content:"";flex:none;width:3px;height:2.25rem;margin-left:2px;background:var(--accent)}.query-display.empty{color:var(--faint);font-size:1.375rem;font-weight:400}.query-display.empty:after{order:-1;margin:0 .625rem 0 0}
+.key-actions{display:grid;grid-template-columns:2fr 1fr;gap:.5rem;margin-top:.75rem}.act{display:flex;align-items:center;justify-content:center;gap:.5rem;height:3rem;border-radius:999px;background:var(--raised);font-size:.9375rem;font-weight:500}.act svg{width:1.125rem;height:1.125rem}
+.keys{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:.5rem;margin-top:.625rem}
+.key{height:3.5rem;border-radius:12px;background:var(--raised);font-size:1.375rem;font-weight:600;text-align:center}.key.word{font-size:.9375rem;font-weight:500}.key.dead{background:#0d0d0d;color:#3a3a3a}
+.key:hover,.act:hover{background:var(--nested)}.key.dead:hover{background:#141414}
+.key:focus,.act:focus,.key.dead:focus{outline:0;background:#fff;color:#000;box-shadow:0 0 0 4px #000,0 0 0 7px #fff}
+.tv-search .voice-hint{margin-top:1rem}.tv-search .grid.tv-results{grid-template-columns:repeat(auto-fill,minmax(12rem,1fr))}
+mark{background:none;color:inherit;font-weight:700;text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:3px}
+
 /* Ten-foot screens: the same layout, scaled for distance, with room for TV overscan and no text below about 19 px. */
 @media(min-width:1700px){html{font-size:24px}:root{--sidebar:14.5rem;--gutter:2.75rem}#rail{padding:2.25rem 1rem 2rem 1.5rem}.page{padding-top:2.25rem;padding-bottom:4rem}
 .card-sub,.row-main small,.game-top,.game-tv,.programme small,.no-guide small,.timeline,.now-line span,.library-name,.footnotes,.keyboard-hint,.about,.setting-panel small,.dialog .hint,#player-meta,.live-bar,.seek-times{font-size:.8125rem}.badge{font-size:.75rem}}
@@ -200,9 +240,12 @@ main{margin-left:var(--sidebar);min-height:100vh;min-width:0}
 .tv #rail{flex-direction:column;border-top:0}.tv #rail .nav-button{flex:none;flex-direction:row;justify-content:flex-start;width:100%;border-radius:999px}.tv #rail .nav-button span{white-space:nowrap}
 .tv #rail.open .brand,.tv #rail:hover .brand,.tv #rail.open .library-name,.tv #rail:hover .library-name{display:block}.tv #rail.open .brand,.tv #rail:hover .brand{display:flex}.tv #rail.open .nav-spacer,.tv #rail:hover .nav-spacer{display:block}
 .tv #rail.open .nav-utility,.tv #rail:hover .nav-utility{display:flex}.tv #rail.open,.tv #rail:hover{overflow-y:auto}.tv #rail:not(.open):not(:hover) .nav-button.active{width:auto}
+@media(max-width:900px){#mv-ui{padding:1.25rem 1rem calc(1rem + env(safe-area-inset-bottom))}.mv-buttons .spacer{flex-basis:100%;height:0}#mv-count{display:none}.dialog.sheet{width:100%}.tv-search{grid-template-columns:minmax(0,1fr)}}
+/* A phone held upright stacks the screens and keeps the controls docked below them. */
+@media(max-width:600px) and (orientation:portrait){#multiview{display:flex;flex-direction:column}#multiview[hidden]{display:none}#mv-tiles{position:relative;top:auto;right:auto;bottom:auto;left:auto;flex:1;min-height:0;margin:calc(.5rem + env(safe-area-inset-top)) .5rem .5rem;grid-template-columns:minmax(0,1fr)!important;grid-template-rows:none!important;grid-auto-rows:minmax(0,1fr)}.mv-tile{grid-area:auto!important}.mv-empty{display:none}#mv-ui{position:relative}#mv-ui.hidden-controls{opacity:1;pointer-events:auto}.mv-buttons .button{flex:1 1 auto}.mv-buttons .segmented{flex:1 1 100%}.mv-buttons .segmented button{flex:1;text-align:center}}
 @media(max-width:600px){:root{--guide-col:6rem}.page-header .header-actions{width:100%}.page-header .segmented{flex:1}.segmented button{flex:1;text-align:center}.timeline{font-size:.6875rem}.now-line span{display:none}.programme small{display:none}}
 /* Samsung 2021 Chromium: preserve spacing when flex gap is unavailable. */
 .no-flex-gap .brand>*+*,.no-flex-gap .nav-button>*+*,.no-flex-gap .button>*+*,.no-flex-gap .chip>*+*,.no-flex-gap .searchbox>*+*{margin-left:.625rem}.no-flex-gap .live-mark:before{margin-right:.5rem}
 .no-flex-gap .actions>*+*,.no-flex-gap .player-buttons>*+*,.no-flex-gap .header-actions>*+*,.no-flex-gap .player-top>*+*{margin-left:.75rem}.no-flex-gap .cards>*+*{margin-left:1rem}.no-flex-gap .chips>*+*,.no-flex-gap .segmented>*+*{margin-left:.5rem}
 .no-flex-gap .row>*+*,.no-flex-gap .setting-panel>*+*,.no-flex-gap .live-top>*+*,.no-flex-gap .section-head>*+*,.no-flex-gap .page-header>*+*,.no-flex-gap .row-top>*+*{margin-left:1rem}.no-flex-gap .live-bar>*+*{margin-left:.875rem}
-.no-flex-gap .team>*+*{margin-left:.625rem}.no-flex-gap .game-top>*+*{margin-left:.75rem}.no-flex-gap .game-status.live:before{margin-right:.375rem}.no-flex-gap .league-chips>*{margin-bottom:.5rem}
+.no-flex-gap .team>*+*,.no-flex-gap .mv-cap>*+*,.no-flex-gap .mv-sound>*+*,.no-flex-gap .watch-all>*+*,.no-flex-gap .mv-empty>*+*{margin-left:.625rem}.no-flex-gap .mv-buttons>*+*,.no-flex-gap .mv-bar>*+*{margin-left:.625rem}.no-flex-gap .mv-clock.live:before{margin-right:.375rem}.no-flex-gap .game-top>*+*{margin-left:.75rem}.no-flex-gap .game-status.live:before{margin-right:.375rem}.no-flex-gap .league-chips>*{margin-bottom:.5rem}
