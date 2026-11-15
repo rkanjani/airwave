@@ -1,21 +1,32 @@
 (function(root,factory){var api=factory();if(typeof module==='object')module.exports=api;else root.AirwaveSports=api;})(this,function(){
   'use strict';
-  // Leagues the Settings toggles offer; soccer lists the home side first, the other sports the visitors. Scores come from ESPN's public scoreboard feed, fetched only while a league is on.
-  var LEAGUES=[{id:'nfl',name:'NFL',path:'football/nfl'},{id:'nba',name:'NBA',path:'basketball/nba'},{id:'mlb',name:'MLB',path:'baseball/mlb'},{id:'nhl',name:'NHL',path:'hockey/nhl'},{id:'wnba',name:'WNBA',path:'basketball/wnba'},{id:'mls',name:'MLS',path:'soccer/usa.1'},{id:'cfb',name:'College football',path:'football/college-football'},{id:'cbb',name:'College basketball',path:'basketball/mens-college-basketball'},{id:'epl',name:'Premier League',path:'soccer/eng.1'},{id:'ucl',name:'Champions League',path:'soccer/uefa.champions'}];
+  // Leagues the Settings toggles offer; soccer and cricket list the home side first, the other sports the visitors. Scores come from ESPN's public scoreboard feed, fetched only while a league is on.
+  // ESPN files international cricket under a new series for every tour, so that toggle reads ESPN's all-cricket feed and keeps only Tests, ODIs and T20Is.
+  var LEAGUES=[{id:'nfl',name:'NFL',path:'football/nfl'},{id:'nba',name:'NBA',path:'basketball/nba'},{id:'mlb',name:'MLB',path:'baseball/mlb'},{id:'nhl',name:'NHL',path:'hockey/nhl'},{id:'wnba',name:'WNBA',path:'basketball/wnba'},{id:'mls',name:'MLS',path:'soccer/usa.1'},{id:'cfb',name:'College football',path:'football/college-football'},{id:'cbb',name:'College basketball',path:'basketball/mens-college-basketball'},{id:'epl',name:'Premier League',path:'soccer/eng.1'},{id:'ucl',name:'Champions League',path:'soccer/uefa.champions'},{id:'cricket',name:'International cricket',path:'cricket',feed:'https://site.web.api.espn.com/apis/v2/scoreboard/header?sport=cricket',international:true},{id:'ipl',name:'IPL',path:'cricket/8048'},{id:'bbl',name:'Big Bash League',path:'cricket/8044'}];
   function league(id){return LEAGUES.find(function(l){return l.id===id;})||null;}
-  function scoreboardUrl(id){var l=league(id);return l?'https://site.api.espn.com/apis/site/v2/sports/'+l.path+'/scoreboard':'';}
+  function scoreboardUrl(id){var l=league(id);return !l?'':l.feed||'https://site.api.espn.com/apis/site/v2/sports/'+l.path+'/scoreboard';}
+  function isCricket(l){return l.path.split('/')[0]==='cricket';}
   function httpsUrl(value){try{var u=new URL(value);return u.protocol==='https:'?u.href:'';}catch(e){return '';}}
   function text(v){return typeof v==='string'?v.trim():'';}
-  function side(c){var t=c&&c.team||{},score=text(c&&c.score);return {name:text(t.displayName)||text(t.name)||'TBD',short:text(t.shortDisplayName)||text(t.displayName)||text(t.abbreviation)||'TBD',nickname:text(t.name),abbr:text(t.abbreviation),logo:httpsUrl(t.logo||''),score:/^\d{1,3}$/.test(score)?score:'',winner:c&&c.winner===true};}
+  // A cricket score reads "156/8 (20 ov, target 153)", or "339 & 120/3" in a Test; the tile keeps the runs and wickets.
+  function cricketScore(s){s=s.split('(')[0].trim();return /^\d{1,3}(\/\d{1,2})?d?( & \d{1,3}(\/\d{1,2})?d?)?$/.test(s)?s:'';}
+  // The all-cricket feed puts team fields on the competitor itself and sends winner as a string. Cricket abbreviations ("SS-W") are cryptic, so its tiles use full names.
+  function side(c,cricket){var t=c&&(c.team||c)||{},score=text(c&&c.score);return {name:text(t.displayName)||text(t.name)||'TBD',short:(cricket?'':text(t.shortDisplayName))||text(t.displayName)||text(t.abbreviation)||'TBD',nickname:text(t.name),abbr:text(t.abbreviation),logo:httpsUrl(t.logo||''),score:cricket?cricketScore(score):/^\d{1,3}$/.test(score)?score:'',winner:!!c&&(c.winner===true||c.winner==='true')};}
+  function feedEvents(data){if(data&&Array.isArray(data.events))return data.events;var out=[];(data&&Array.isArray(data.sports)?data.sports:[]).forEach(function(s){(s&&Array.isArray(s.leagues)?s.leagues:[]).forEach(function(l){if(l&&Array.isArray(l.events))out=out.concat(l.events);});});return out;}
   // Keeps only what the tiles and channel matching need; malformed events are skipped rather than shown half-empty.
   function parseScoreboard(data,id){
-    var l=league(id),events=data&&Array.isArray(data.events)?data.events:[];if(!l)return [];
+    var l=league(id);if(!l)return [];var cricket=isCricket(l),events=feedEvents(data);
+    if(l.international)events=events.filter(function(e){var cls=e&&(e.class||Array.isArray(e.competitions)&&e.competitions[0]&&e.competitions[0].class)||{};return /^[1-9]\d*$/.test(String(cls.internationalClassId));});
     return events.slice(0,100).map(function(e){
-      var comp=e&&Array.isArray(e.competitions)&&e.competitions[0],cs=comp&&Array.isArray(comp.competitors)?comp.competitors:[],status=e&&e.status&&e.status.type||{},start=Date.parse(e&&e.date);
+      var comp=e&&(Array.isArray(e.competitions)?e.competitions[0]:Array.isArray(e.competitors)&&e),cs=comp&&Array.isArray(comp.competitors)?comp.competitors:[],status=e&&(e.status&&e.status.type||e.fullStatus&&e.fullStatus.type)||{},start=Date.parse(e&&e.date);
       var home=cs.find(function(c){return c&&c.homeAway==='home';}),away=cs.find(function(c){return c&&c.homeAway==='away';});
       if(!e||!e.id||!home||!away||!isFinite(start)||['pre','in','post'].indexOf(status.state)<0)return null;
+      // Cricket says "Stumps" or "Lunch" mid-match and gives a one-line result ("Renegades won by 2 wkts"), kept as a note once play starts.
+      var detail=text(status.shortDetail)||text(status.detail)||'',note='';
+      if(cricket){var d=text(status.description);detail=status.state==='post'&&/^result$/i.test(d)?'Final':d||detail;if(status.state!=='pre')note=(text(e.status&&e.status.summary)||text(e.fullStatus&&e.fullStatus.summary)).slice(0,80);}
+      var cls=e.class||comp.class||{},leagueName=l.international&&text(cls.generalClassCard)||l.name;
       var names=[];(comp.broadcasts||[]).forEach(function(b){(b&&Array.isArray(b.names)?b.names:[]).forEach(function(n){n=text(n);if(n&&names.indexOf(n)<0)names.push(n);});});
-      return {id:l.id+':'+e.id,league:l.id,leagueName:l.name,name:text(e.name)||side(away).name+' at '+side(home).name,state:status.state,scheduled:status.name==='STATUS_SCHEDULED',detail:text(status.shortDetail)||text(status.detail)||'',start:start,home:side(home),away:side(away),homeFirst:l.path.indexOf('soccer/')===0,broadcasts:names.slice(0,4)};
+      return {id:l.id+':'+e.id,league:l.id,leagueName:leagueName,name:text(e.name)||side(away).name+' at '+side(home).name,state:status.state,scheduled:status.name==='STATUS_SCHEDULED'||cricket&&status.state==='pre',detail:detail,note:note,start:start,home:side(home,cricket),away:side(away,cricket),homeFirst:cricket||l.path.indexOf('soccer/')===0,broadcasts:names.slice(0,4)};
     }).filter(Boolean);
   }
   // Live games first, then the next to start, then the most recently finished.
