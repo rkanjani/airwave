@@ -110,6 +110,10 @@ Each run measured 20 s after a 4 s warm-up, two interleaved runs per cell. Other
 
 - Checked at 1920×1080 with `?tv=1` in Chromium using arrow, OK and Back keys: the menu shows as the current page's name until Left from the first tile opens it over the dimmed page; Up/Down move through it; OK changes page; Right returns to the page and closes it; Back steps page → menu → Home. The focused tile lifts with a white ring while its row dims; section titles scroll under a solid top band instead of under the menu; Live TV keeps its channel/guide switch and filters; the player's focused buttons fill white and its text stays readable over a bright frame. A desktop with a mouse at the same size keeps the normal sidebar. Not seen on a Samsung TV.
 
+## Multiview and TV search (November 2026)
+
+Observed with the demo library only. In Chromium (in-app browser): four screens played at once, only the focused screen was unmuted, focus moving to another screen moved the sound, OK opened full screen and Back returned to the grid; the TV search keyboard typed, deleted and reached results with arrow keys at 1920×1080. One demo trailer stopped with a decode error in that browser outside Airwave too. In the iOS simulator (iPad mini, unsigned Debug build): three native engines played under the page, captions and the Sound badge drew over them, tapping a screen moved the sound badge and Back removed the native screens. Not observed: provider channels, audio output on hardware, the macOS app (its Debug build shares the real catalog), Samsung decoder limits, and remote keys on a TV.
+
 ## Remaining verification
 
 Physical Samsung installation, remote controls and voice; Apple TV device playback, dictation and Siri; Samsung firmware and codecs; signing and WGT packaging; physical iOS playback; public hosting; App Store distribution; series resolution; full codec coverage; provider refresh. The browser and Samsung players do not support MKV/AVI; on Apple they depend on mpv. Hardware playback is not proven by mocked AVPlay tests or successful Apple builds.

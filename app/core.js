@@ -34,10 +34,18 @@
   }
   function currentProgram(programs,id,now){return (programs[id]||[]).find(function(p){return p.start<=now&&p.end>now;})||null;}
   function progress(program,now){return program?Math.max(0,Math.min(100,(now-program.start)/(program.end-program.start)*100)):0;}
-  // A query matches as a plain substring, or when every word starts a word of the text. Searches typed a letter at a time
-  // or dictated ("espn two", "news uk") keep their results between words.
-  function matchesQuery(text,query){var q=(query||'').trim().toLocaleLowerCase();if(!q)return true;if(String(text).toLocaleLowerCase().indexOf(q)>=0)return true;var want=spokenWords(q),have=spokenWords(text);return want.length>0&&want.every(function(w){return have.some(function(h){return h.indexOf(w)===0;});});}
-  function filter(items,query,group,kind){return items.filter(function(x){return (!kind||x.kind===kind)&&(!group||group==='All'||x.group===group)&&matchesQuery(x.name+' '+x.group,query);});}
+  // Search folds case, accents, styled letters and punctuation, so "espn 2" finds "ESPN2" and "fox sports" finds "FOX: SPORTS 1".
+  // Spoken numbers count as digits ("espn two"). Every typed word must appear in the playlist name or group. Names that start with the query rank first, then names with a
+  // word that starts with it, then the rest in library order; an empty query keeps library order.
+  var LETTERS=/[^\p{L}\p{N}]+/gu,folded=typeof WeakMap==='function'?new WeakMap():null;
+  function fold(s){return String(s||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase();}
+  function terms(query){return fold(query).split(LETTERS).filter(Boolean).map(function(w){return NUMBERS[w]||w;});}
+  function matchesQuery(text,query){var ts=terms(query),all=fold(text).replace(LETTERS,'');return ts.every(function(t){return all.indexOf(t)>=0;});}
+  function searchKey(x){var k=folded&&folded.get(x);if(!k){var name=fold(x.name);k={name:name.replace(LETTERS,''),words:name.split(LETTERS).filter(Boolean),all:fold(x.name+' '+x.group).replace(LETTERS,'')};if(folded)folded.set(x,k);}return k;}
+  function rank(x,ts,joined){var k=searchKey(x);if(!ts.every(function(t){return k.all.indexOf(t)>=0;}))return -1;return k.name.indexOf(joined)===0?0:k.words.some(function(w){return w.indexOf(ts[0])===0;})?1:2;}
+  function filter(items,query,group,kind){var ts=terms(query),joined=ts.join(''),out=[];items.forEach(function(x,i){if(kind&&x.kind!==kind||group&&group!=='All'&&x.group!==group)return;var r=ts.length?rank(x,ts,joined):0;if(r>=0)out.push({x:x,r:r,i:i});});if(ts.length)out.sort(function(a,b){return a.r-b.r||a.i-b.i;});return out.map(function(o){return o.x;});}
+  // The span of shown text that the folded query matches, as [start, end) offsets, for underlining in results; null if none.
+  function matchSpan(text,query){var t=terms(query).join('');if(!t)return null;var joined='',map=[],offset=0;Array.from(String(text||'')).forEach(function(ch){var f=fold(ch).replace(LETTERS,'');for(var i=0;i<f.length;i++)map.push([offset,offset+ch.length]);joined+=f;offset+=ch.length;});var at=joined.indexOf(t);return at<0?null:[map[at][0],map[at+t.length-1][1]];}
   // Playlist names carry provider decoration: region prefixes, divider runs, styled Unicode letters and quality tags.
   // Tidying returns the readable name, the quality and stream tags it removed for badges, and the feed notes (RAW, frame
   // rate) it dropped without a badge.
@@ -102,5 +110,5 @@
       if(s>score){score=s;best=x;}});});
     return best;
   }
-  return {httpUrl:httpUrl,hash:hash,matchSpoken:matchSpoken,matchesQuery:matchesQuery,parseM3U:parseM3U,xmlTime:xmlTime,parseXMLTV:parseXMLTV,currentProgram:currentProgram,progress:progress,filter:filter,tidyName:tidyName,tidyGroups:tidyGroups,clock:clock};
+  return {httpUrl:httpUrl,hash:hash,matchSpoken:matchSpoken,matchesQuery:matchesQuery,parseM3U:parseM3U,xmlTime:xmlTime,parseXMLTV:parseXMLTV,currentProgram:currentProgram,progress:progress,filter:filter,matchSpan:matchSpan,tidyName:tidyName,tidyGroups:tidyGroups,clock:clock};
 });

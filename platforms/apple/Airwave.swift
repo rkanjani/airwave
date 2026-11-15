@@ -32,6 +32,9 @@ struct AirwaveApp: App {
     var body: some Scene {
         WindowGroup {
             ZStack {
+                // Multiview screens sit under the transparent page, which draws their captions and controls.
+                Color.black.ignoresSafeArea()
+                MultiviewSurface(model: model)
                 AirwaveWebView(model: model)
                 if let playback = model.playback {
                     AirwavePlayerOverlay(state: playback, favorite: model.favorite, toggleFavorite: { model.toggleFavorite() }) { model.stop() }
@@ -40,7 +43,7 @@ struct AirwaveApp: App {
             }
             .animation(.easeOut(duration: 0.2), value: model.playback.map(ObjectIdentifier.init))
             .preferredColorScheme(.dark)
-            .onChange(of: scenePhase) { phase in if phase == .background { model.stop() } }
+            .onChange(of: scenePhase) { phase in if phase == .background { model.stop(); model.stopMultiview() } }
             #if os(macOS)
             .frame(minWidth: 800, minHeight: 550)
             #endif
@@ -57,6 +60,8 @@ struct AirwaveApp: App {
 final class AirwaveModel: NSObject, ObservableObject, WKScriptMessageHandler, WKNavigationDelegate {
     @Published var playback: PlaybackState?
     @Published var favorite = false
+    @Published var tiles: [MultiviewTile] = []
+    private var multiviewToken = 0
     weak var webView: WKWebView?
     private var catalog: [String: Any]?
     private var media: [String: [String: Any]] = [:]
@@ -83,7 +88,7 @@ final class AirwaveModel: NSObject, ObservableObject, WKScriptMessageHandler, WK
             guard let item = self?.media[id], item["kind"] as? String == "live", let raw = item["url"] as? String, let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return nil }
             return url
         }
-        artwork.frames.busy = { [weak self] in self?.playback != nil }
+        artwork.frames.busy = { [weak self] in self?.playback != nil || self?.tiles.isEmpty == false }
         view.navigationDelegate = self
         #if os(iOS)
         GCKCastContext.sharedInstance().sessionManager.add(self)
@@ -122,6 +127,8 @@ final class AirwaveModel: NSObject, ObservableObject, WKScriptMessageHandler, WK
             start(next)
             reply(id, result: true)
         case "stop": stop(); reply(id, result: true)
+        case "multiview": updateMultiview(payload); reply(id, result: true)
+        case "multiviewStop": if payload["token"] as? Int == multiviewToken { stopMultiview(notify: false) }; reply(id, result: true)
         case "clearArtwork": artwork.clear(); reply(id, result: true)
         case "toggle": playback?.toggle(); reply(id, result: true)
         case "seek": playback?.seek(by: payload["delta"] as? Double ?? 0); reply(id, result: true)
@@ -216,6 +223,83 @@ final class AirwaveModel: NSObject, ObservableObject, WKScriptMessageHandler, WK
         startDeadline?.cancel(); startDeadline = nil
         playback?.close(); playback = nil
         if notify { emit("native-closed", token: oldToken) }
+    }
+    // Multiview: up to four screens, each its own engine chosen by PlaybackPolicy with the same one-time fallback
+    // as single playback. The page sends every screen's rectangle in its own coordinates (the web view and the
+    // surface share a frame) and which screen is heard; the rest are muted. Events go back by screen key and token.
+    private func updateMultiview(_ payload: [String: Any]) {
+        let token = payload["token"] as? Int ?? 0
+        if token != multiviewToken { stopMultiview(notify: false); multiviewToken = token }
+        if playback != nil { stop(notify: false) }
+        artwork.frames.pause()
+        let audio = payload["audio"] as? String
+        var next: [MultiviewTile] = []
+        for spec in (payload["tiles"] as? [[String: Any]] ?? []).prefix(4) {
+            guard let key = spec["key"] as? String, let mediaID = spec["id"] as? String else { continue }
+            let frame = CGRect(x: spec["x"] as? Double ?? 0, y: spec["y"] as? Double ?? 0, width: max(0, spec["w"] as? Double ?? 0), height: max(0, spec["h"] as? Double ?? 0))
+            if let tile = tiles.first(where: { $0.id == key }) { tile.frame = frame; next.append(tile); continue }
+            let raw = media[mediaID]?["url"] as? String ?? spec["url"] as? String ?? ""
+            guard let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { emitTile(key, "error", "Unsupported media URL."); continue }
+            let request = PlayRequest(key: mediaID, url: url, live: (media[mediaID]?["kind"] as? String ?? spec["kind"] as? String) == "live", resume: 0, token: token)
+            let kind = winners[mediaID] ?? PlaybackPolicy.engine(for: request, externalRoute: false)
+            let tile = MultiviewTile(id: key, request: request, frame: frame, engine: kind == .mpv ? MPVEngine() : AVPlayerEngine())
+            next.append(tile)
+            beginTile(tile, kind: kind, fallback: false)
+        }
+        for old in tiles where !next.contains(where: { $0 === old }) { old.close() }
+        tiles = next
+        for tile in tiles { tile.state.muted = tile.id != audio }
+    }
+    private func beginTile(_ tile: MultiviewTile, kind: EngineKind, fallback: Bool) {
+        if fallback { tile.state.use(kind == .mpv ? MPVEngine() : AVPlayerEngine()) }
+        let began = PlaybackTiming.now, token = multiviewToken
+        tile.state.forward = { [weak self, weak tile] event in
+            guard let self, let tile else { return }
+            self.handleTile(event, tile: tile, kind: kind, began: began, fallback: fallback, token: token)
+        }
+        tile.deadline?.cancel()
+        if !fallback, kind == .mpv {
+            let limit: UInt64 = tile.request.live ? 8 : 15
+            tile.deadline = Task { [weak self, weak tile] in
+                try? await Task.sleep(nanoseconds: limit * 1_000_000_000)
+                guard !Task.isCancelled, let self, let tile, self.multiviewToken == token, !tile.state.started, self.tiles.contains(where: { $0 === tile }) else { return }
+                self.retryTile(tile, from: kind, result: "timeout", began: began)
+            }
+        }
+        tile.state.engine.load(tile.request.url(for: kind), resume: 0)
+    }
+    private func handleTile(_ event: EngineEvent, tile: MultiviewTile, kind: EngineKind, began: Double, fallback: Bool, token: Int) {
+        guard multiviewToken == token, tiles.contains(where: { $0 === tile }) else { return }
+        switch event {
+        case .firstFrame:
+            tile.deadline?.cancel()
+            if fallback { winners[tile.request.key] = kind }
+            PlaybackTiming.record(kind, tile.request, attempt: fallback ? 2 : 1, result: "first-frame", since: began)
+            emitTile(tile.id, "playing")
+        case .failed(let reason):
+            if !tile.state.started, !fallback { return retryTile(tile, from: kind, result: "failed", began: began, detail: reason) }
+            PlaybackTiming.record(kind, tile.request, attempt: fallback ? 2 : 1, result: "failed", since: began, detail: reason)
+            emitTile(tile.id, "error", "This stream or codec can't be played on this device.")
+        case .ended: emitTile(tile.id, "ended")
+        case .status(let playing, let waiting):
+            if waiting { emitTile(tile.id, "loading", "Buffering…") } else if playing, tile.state.started { emitTile(tile.id, "playing") }
+        case .time, .externalPlayback: break
+        }
+    }
+    private func retryTile(_ tile: MultiviewTile, from kind: EngineKind, result: String, began: Double, detail: String? = nil) {
+        PlaybackTiming.record(kind, tile.request, attempt: 1, result: result, since: began, detail: detail)
+        emitTile(tile.id, "loading", "Trying another player…")
+        beginTile(tile, kind: kind.other, fallback: true)
+    }
+    private func emitTile(_ key: String, _ event: String, _ value: Any = NSNull()) {
+        guard let data = try? JSONSerialization.data(withJSONObject: [multiviewToken, key, event, value], options: [.fragmentsAllowed]), let args = String(data: data, encoding: .utf8) else { return }
+        webView?.evaluateJavaScript("window.__airwaveMultiview && window.__airwaveMultiview.apply(null,\(args))", completionHandler: nil)
+    }
+    // notify tells the page that multiview ended natively (the app went to the background).
+    func stopMultiview(notify: Bool = true) {
+        guard !tiles.isEmpty else { return }
+        tiles.forEach { $0.close() }; tiles = []
+        if notify { emitTile("", "closed") }
     }
     private func loadCatalog(_ data: Data) throws {
         guard data.count <= 100_000_000, let json = try JSONSerialization.jsonObject(with: data) as? [String: Any], let items = json["items"] as? [[String: Any]], !items.isEmpty, items.count <= 200_000 else { throw CocoaError(.fileReadCorruptFile) }
@@ -1159,16 +1243,65 @@ private final class MPVRelay: @unchecked Sendable { weak var engine: MPVEngine? 
 #if os(macOS)
 struct AirwaveWebView: NSViewRepresentable {
     let model: AirwaveModel
-    func makeNSView(context: Context) -> WKWebView { let configuration = WKWebViewConfiguration(); configuration.setURLSchemeHandler(model.artwork, forURLScheme: ArtworkSchemeHandler.scheme); configuration.userContentController.add(model, name: "airwave"); let view = WKWebView(frame: .zero, configuration: configuration); model.configure(view); return view }
+    func makeNSView(context: Context) -> WKWebView { let configuration = WKWebViewConfiguration(); configuration.setURLSchemeHandler(model.artwork, forURLScheme: ArtworkSchemeHandler.scheme); configuration.userContentController.add(model, name: "airwave"); let view = WKWebView(frame: .zero, configuration: configuration); view.setValue(false, forKey: "drawsBackground"); model.configure(view); return view }
     func updateNSView(_ view: WKWebView, context: Context) {}
 }
 #elseif os(iOS)
 struct AirwaveWebView: UIViewRepresentable {
     let model: AirwaveModel
-    func makeUIView(context: Context) -> WKWebView { let configuration = WKWebViewConfiguration(); configuration.allowsInlineMediaPlayback = true; configuration.setURLSchemeHandler(model.artwork, forURLScheme: ArtworkSchemeHandler.scheme); configuration.userContentController.add(model, name: "airwave"); let view = WKWebView(frame: .zero, configuration: configuration); view.scrollView.contentInsetAdjustmentBehavior = .never; model.configure(view); return view }
+    func makeUIView(context: Context) -> WKWebView { let configuration = WKWebViewConfiguration(); configuration.allowsInlineMediaPlayback = true; configuration.setURLSchemeHandler(model.artwork, forURLScheme: ArtworkSchemeHandler.scheme); configuration.userContentController.add(model, name: "airwave"); let view = WKWebView(frame: .zero, configuration: configuration); view.scrollView.contentInsetAdjustmentBehavior = .never; view.isOpaque = false; view.backgroundColor = .clear; view.scrollView.backgroundColor = .clear; model.configure(view); return view }
     func updateUIView(_ view: WKWebView, context: Context) {}
 }
 #endif
+
+// One multiview screen: its key from the page, the request it plays, its rectangle in page coordinates, and the
+// playback session (muted unless it is the screen with focus).
+@MainActor final class MultiviewTile: ObservableObject, Identifiable {
+    let id: String
+    let request: PlayRequest
+    let state: PlaybackState
+    @Published var frame: CGRect
+    var deadline: Task<Void, Never>?
+    init(id: String, request: PlayRequest, frame: CGRect, engine: any PlaybackEngine) {
+        self.id = id; self.request = request; self.frame = frame
+        state = PlaybackState(engine: engine, live: request.live); state.muted = true
+    }
+    func close() { deadline?.cancel(); state.close() }
+}
+// Multiview lives in the web interface, which tvOS does not have.
+#if !os(tvOS)
+struct MultiviewSurface: View {
+    @ObservedObject var model: AirwaveModel
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(model.tiles) { tile in MultiviewTileView(tile: tile) }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .allowsHitTesting(false)
+    }
+}
+#endif
+struct MultiviewTileView: View {
+    @ObservedObject var tile: MultiviewTile
+    var body: some View {
+        MultiviewVideo(state: tile.state)
+            .frame(width: tile.frame.width, height: tile.frame.height)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .offset(x: tile.frame.minX, y: tile.frame.minY)
+            .opacity(tile.frame.width > 0 && tile.frame.height > 0 ? 1 : 0)
+    }
+}
+// Tiles draw the bare picture: AVPlayer through its own layer (no system controls), mpv through its Metal layer.
+struct MultiviewVideo: View {
+    @ObservedObject var state: PlaybackState
+    var body: some View {
+        ZStack {
+            Color.black
+            if let av = state.engine as? AVPlayerEngine { PlayerLayerSurface(player: av.player).id(ObjectIdentifier(av)) }
+            else if let mpv = state.engine as? MPVEngine { MetalSurface(layer: mpv.layer).id(ObjectIdentifier(mpv)) }
+        }
+    }
+}
 
 // The surface for whichever engine is active: the AVPlayer view, or mpv's Metal layer.
 struct AirwaveVideoView: View {
@@ -1216,6 +1349,21 @@ struct MetalSurface: NSViewRepresentable {
     func makeNSView(context: Context) -> MetalHostView { MetalHostView(layer) }
     func updateNSView(_ view: MetalHostView, context: Context) {}
 }
+final class PlayerLayerView: NSView {
+    let playerLayer = AVPlayerLayer()
+    init(_ player: AVPlayer) {
+        super.init(frame: .zero); wantsLayer = true
+        playerLayer.player = player; playerLayer.videoGravity = .resizeAspect; layer?.addSublayer(playerLayer)
+    }
+    required init?(coder: NSCoder) { nil }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func layout() { super.layout(); CATransaction.begin(); CATransaction.setDisableActions(true); playerLayer.frame = bounds; CATransaction.commit() }
+}
+struct PlayerLayerSurface: NSViewRepresentable {
+    let player: AVPlayer
+    func makeNSView(context: Context) -> PlayerLayerView { PlayerLayerView(player) }
+    func updateNSView(_ view: PlayerLayerView, context: Context) { if view.playerLayer.player !== player { view.playerLayer.player = player } }
+}
 struct AirPlayButton: NSViewRepresentable {
     let player: AVPlayer
     func makeNSView(context: Context) -> AVRoutePickerView {
@@ -1260,6 +1408,17 @@ struct MetalSurface: UIViewRepresentable {
     let layer: CAMetalLayer
     func makeUIView(context: Context) -> MetalHostView { MetalHostView(layer) }
     func updateUIView(_ view: MetalHostView, context: Context) {}
+}
+final class PlayerLayerView: UIView {
+    override class var layerClass: AnyClass { AVPlayerLayer.self }
+    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+    init(_ player: AVPlayer) { super.init(frame: .zero); backgroundColor = .black; isUserInteractionEnabled = false; playerLayer.player = player; playerLayer.videoGravity = .resizeAspect }
+    required init?(coder: NSCoder) { nil }
+}
+struct PlayerLayerSurface: UIViewRepresentable {
+    let player: AVPlayer
+    func makeUIView(context: Context) -> PlayerLayerView { PlayerLayerView(player) }
+    func updateUIView(_ view: PlayerLayerView, context: Context) { if view.playerLayer.player !== player { view.playerLayer.player = player } }
 }
 #endif
 
