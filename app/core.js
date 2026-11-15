@@ -34,7 +34,10 @@
   }
   function currentProgram(programs,id,now){return (programs[id]||[]).find(function(p){return p.start<=now&&p.end>now;})||null;}
   function progress(program,now){return program?Math.max(0,Math.min(100,(now-program.start)/(program.end-program.start)*100)):0;}
-  function filter(items,query,group,kind){query=(query||'').trim().toLocaleLowerCase();return items.filter(function(x){return (!kind||x.kind===kind)&&(!group||group==='All'||x.group===group)&&(!query||(x.name+' '+x.group).toLocaleLowerCase().indexOf(query)>=0);});}
+  // A query matches as a plain substring, or when every word starts a word of the text. Searches typed a letter at a time
+  // or dictated ("espn two", "news uk") keep their results between words.
+  function matchesQuery(text,query){var q=(query||'').trim().toLocaleLowerCase();if(!q)return true;if(String(text).toLocaleLowerCase().indexOf(q)>=0)return true;var want=spokenWords(q),have=spokenWords(text);return want.length>0&&want.every(function(w){return have.some(function(h){return h.indexOf(w)===0;});});}
+  function filter(items,query,group,kind){return items.filter(function(x){return (!kind||x.kind===kind)&&(!group||group==='All'||x.group===group)&&matchesQuery(x.name+' '+x.group,query);});}
   // Playlist names carry provider decoration: region prefixes, divider runs, styled Unicode letters and quality tags.
   // Tidying returns the readable name, the quality and stream tags it removed for badges, and the feed notes (RAW, frame
   // rate) it dropped without a badge.
@@ -86,5 +89,18 @@
     c=counts();tidy.forEach(function(x){out[x.raw]=c[x.label]>1?x.raw:x.label;});return out;
   }
   function clock(seconds){seconds=Math.max(0,Math.floor(seconds||0));var h=Math.floor(seconds/3600),m=Math.floor(seconds%3600/60),s=String(seconds%60).padStart(2,'0');return h?h+':'+String(m).padStart(2,'0')+':'+s:m+':'+s;}
-  return {httpUrl:httpUrl,hash:hash,parseM3U:parseM3U,xmlTime:xmlTime,parseXMLTV:parseXMLTV,currentProgram:currentProgram,progress:progress,filter:filter,tidyName:tidyName,tidyGroups:tidyGroups,clock:clock};
+  // A spoken title rarely matches a playlist name exactly: assistants drop punctuation, spell numbers and add "the" or "channel".
+  // Exact matches beat a name that starts with the phrase, which beats one containing every spoken word. Ties keep list order.
+  var FILLER=/^(the|a|an|channel|on|play|watch|open|select|show|tv)$/;
+  var NUMBERS={zero:'0',one:'1',two:'2',three:'3',four:'4',five:'5',six:'6',seven:'7',eight:'8',nine:'9',ten:'10'};
+  function spokenWords(s){return words(String(s||'').replace(/&/g,' and ')).map(function(w){return NUMBERS[w]||w;});}
+  function matchSpoken(items,phrase,nameOf){
+    nameOf=nameOf||function(x){return x.name;};var said=spokenWords(phrase),core=said.filter(function(w){return !FILLER.test(w);});if(!core.length)core=said;if(!core.length)return null;
+    var joined=core.join(''),best=null,score=0;
+    items.forEach(function(x){[nameOf(x),x.name].forEach(function(name){var w=spokenWords(name),kept=w.filter(function(v){return !FILLER.test(v);}),flat=kept.join(''),s=0;
+      if(!flat)return;if(flat===joined)s=4;else if(flat.indexOf(joined)===0&&joined.length>=2)s=3;else if(core.every(function(v){return kept.indexOf(v)>=0;}))s=2;else if(joined.length>=3&&flat.indexOf(joined)>=0)s=1;
+      if(s>score){score=s;best=x;}});});
+    return best;
+  }
+  return {httpUrl:httpUrl,hash:hash,matchSpoken:matchSpoken,matchesQuery:matchesQuery,parseM3U:parseM3U,xmlTime:xmlTime,parseXMLTV:parseXMLTV,currentProgram:currentProgram,progress:progress,filter:filter,tidyName:tidyName,tidyGroups:tidyGroups,clock:clock};
 });

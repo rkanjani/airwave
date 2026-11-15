@@ -15,7 +15,7 @@ No public hosted service or store distribution has been established.
 These status claims come from the initial development scope and the current source,
 not from a published App Store or Samsung listing.
 
-Supported development targets are browser, Samsung Tizen 6.0+, macOS 13+ and iOS 16+.
+Supported development targets are browser, Samsung Tizen 6.0+, macOS 13+, iOS 16+ and tvOS 17+ (Apple TV, a native interface, exercised in the simulator only).
 Browser and macOS real playback were observed in initial development.
 iOS simulator builds succeeded; physical iOS and Samsung playback remain unverified.
 Successful import is not proof that every stream/container/codec will play.
@@ -36,7 +36,7 @@ Successful import is not proof that every stream/container/codec will play.
 | `docs/` | Docs | This product, architecture, history and debt map |
 | `package.json` | Config | Commands, Node engine, license and exact dependencies; private prevents accidental npm publication |
 | `package-lock.json` | Generated/committed | Reproducible dependency resolution; update through npm |
-| `platforms/` | First-party/config | Swift Apple shell, plist, app icon asset catalog and hand-authored Xcode project/shared schemes |
+| `platforms/` | First-party/config | Swift Apple shell (web view for macOS/iOS, native SwiftUI for Apple TV), plists, icon asset catalogs and hand-authored Xcode project/shared schemes |
 | `scripts/` | First-party tooling | Local server, unified checks, runtime allowlist, web release and Tizen packager |
 | `server/` | First-party | Private library registry, HLS rewriting, safe upstream requests and the tile-artwork cache |
 | `tests/` | Synthetic tests | Node tests for parsing, filtering, playback, native bridge, relay and release staging |
@@ -64,10 +64,18 @@ Apple -> Airwave.swift -> bundled app/index.html -> webkit airwave messages
 iOS   -> Google Cast iOS SDK -> Cast device -> user-selected provider
 
 Samsung -> app/config.xml -> app/index.html -> player.js -> Samsung AVPlay
+        -> voice.js <- webapis.voiceinteraction (TV assistant) -> app.js voiceCommand
+
+Apple TV -> AirwaveTV.swift (SwiftUI) -> JavaScriptCore app/core.js (parse, tidy, match)
+         -> encrypted catalog in Caches + source link in Keychain -> PlaybackPolicy -> AVPlayerViewController or mpv
+         -> user-selected provider
 ```
 
 `app/styles.css` switches between a labelled TV/desktop sidebar and, at 900px and below, a
 top bar plus five-tab bottom bar; screens of 1700px and wider scale the same layout for TV distance.
+In TV mode (Samsung, a large screen with no mouse, or `?tv=1`) the sidebar collapses to the current page's name in
+the top-left corner and opens over the dimmed page when the remote moves onto it, matching Airwave's tvOS app;
+tiles are 16:9 at 384 px and posters 248 px at 1080p, and the player drops its Back button for the remote's.
 The shared player shows a remote-scrubbable seek bar for movies and programme progress for live channels.
 The UI is shared. Apple playback picks an engine per title (`PlaybackPolicy` in `Airwave.swift`):
 AVPlayer for HLS and MP4/MOV/M4V, and for everything while AirPlay is in use; mpv (libmpv with FFmpeg,
@@ -196,6 +204,7 @@ no earlier Git history, tag, merged PR or removal record to reconstruct here.
 | 2026-10-25 | Measured AVPlayer super-resolution; added it as an SD-only opt-in (`-AirwaveSuperResolution YES`) | `270181a`, `0136ca6` |
 | 2026-10-25 | macOS and iOS apps use the wave bands mark as their app icon | `8dea7f8` |
 | 2026-10-25 | Home shows scores for sports leagues followed in Settings; choosing a game plays the matching channel | `53310bf` |
+| 2026-11-14 | TV remote navigation reworked (column-aware focus, Back to the sidebar, distinct focus and selection, ten-foot sizing, channel up/down); Samsung voice commands and browser voice search; native Apple TV app with dictation and Siri playback | branch `claude/tv-ux-voice-input-cc90b0` |
 | 2026-10-25 | Live tiles show a still of the channel, grabbed serially through the relay (ffmpeg) and natively on Apple (mpv), with the logo as fallback | `843add1` |
 
 The initial import is evidence of the current implementation, not a claim that all its
@@ -250,11 +259,12 @@ catalogs, device exports, user-specific verification details or credential-beari
 2. Samsung AVPlay initialization assumes `window.webapis` exists. `app/index.html` does
    not explicitly load Samsung's Web APIs script; verify the on-device loading path before
    claiming native Samsung playback. This is a source-derived risk, not a reproduced device failure.
-3. Physical Samsung/iPhone playback, remote behavior, certificates and store distribution
+3. Apple TV (`Airwave-tvOS`) has run only in the simulator with synthetic streams; device playback, dictation and Siri are unverified. Focus returns to the tile that started playback, not the last channel surfed to. Resuming a movie needs a source that honours HTTP Range; when one does not, the Apple TV player says it is starting from the beginning (the web and macOS/iOS players restart silently). Building needs Xcode's tvOS platform component. It has no XMLTV guide, sports scores, live tile stills or casting yet, and Siri "play X in Airwave" would need media intents. Samsung voice commands are tested against a stub only.
+4. Physical Samsung/iPhone playback, remote behavior, certificates and store distribution
    remain unverified. The Apple build commands compile without signing; no CI Apple job exists.
-4. Series episode resolution, provider refresh/login UI, automatic provider guide population, catch-up, DVR,
+5. Series episode resolution, provider refresh/login UI, automatic provider guide population, catch-up, DVR,
    multiview, DRM integration and cloud sync are not implemented.
-5. Apple targets play MKV/AVI and raw MPEG-TS through mpv (MPVKit 1.0.0); the browser and Samsung
+6. Apple targets play MKV/AVI and raw MPEG-TS through mpv (MPVKit 1.0.0); the browser and Samsung
    still need a remux/transcode strategy for those, and imported-library count is not a compatibility
    metric. mpv playback has been timed on public samples and a simulated provider on macOS and the iOS
    simulator only: provider channels, physical iPhone/iPad decode and battery cost, and HDR output are
@@ -264,16 +274,16 @@ catalogs, device exports, user-specific verification details or credential-beari
    review.
    Titles without catalog or guide artwork have no poster source yet (a provider VOD-info or
    opt-in metadata lookup would be next).
-6. Reset clears the Apple artwork cache but does not delete the external relay catalog or Apple encrypted file. The UI states
+7. Reset clears the Apple artwork cache but does not delete the external relay catalog or Apple encrypted file. The UI states
    this boundary. A full remove-library flow would need its own implementation and tests.
-7. ATS permits HTTP media. Distribution needs a documented exception or narrower policy.
-8. First-party JS is compact and has no formatter/linter/typechecker. Current checks cover
+8. ATS permits HTTP media. Distribution needs a documented exception or narrower policy.
+9. First-party JS is compact and has no formatter/linter/typechecker. Current checks cover
    syntax, wiring, hygiene and behavior tests, not exhaustive static analysis or accessibility.
-9. Casting is verified only against a synthetic Cast framework, the relay's token tests and the
+10. Casting is verified only against a synthetic Cast framework, the relay's token tests and the
    iOS simulator's Cast prompt. Real receiver playback, HTTP sources on the HTTPS receiver page,
    provider CORS and the iOS local-network prompt on hardware are unverified. A custom receiver
    or an iOS-side relay would be needed for HLS providers without CORS when casting from iOS.
-10. The iOS target links the Google Cast SDK (exact 4.8.6). Its Bluetooth/local-network usage and
+11. The iOS target links the Google Cast SDK (exact 4.8.6). Its Bluetooth/local-network usage and
    App Store privacy declarations need review before distribution.
 
 ## Release ownership

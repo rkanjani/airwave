@@ -1,12 +1,12 @@
 # Airwave 0.2
 
-Independent media player with an original interface and artwork, and no payment gates. One HTML/CSS/JavaScript interface serves web, Samsung TV, iOS and macOS; playback and private storage use platform adapters.
+Independent media player with an original interface and artwork, and no payment gates. One HTML/CSS/JavaScript interface serves web, Samsung TV, iOS and macOS; playback and private storage use platform adapters. Apple TV, which has no web view, has a native interface built on the same playback engines and shared parsing code.
 
 ## Verified status
 
 Development version 0.2.0. Browser HLS playback and native macOS playback have been exercised with a private user-provided catalog. The iOS simulator and macOS targets compile. This is not a store release or certification of every stream or codec.
 
-Samsung target is Tizen 6.0+. Physical iOS and Samsung TV playback remain unverified. No playlists, provider accounts, credentials or channel subscriptions are included.
+Samsung target is Tizen 6.0+. Apple TV target is tvOS 17+; it builds and was exercised in the tvOS 26.2 simulator with synthetic local streams. Physical iOS, Apple TV and Samsung TV playback remain unverified. No playlists, provider accounts, credentials or channel subscriptions are included.
 
 ## Architecture
 
@@ -20,6 +20,8 @@ Samsung target is Tizen 6.0+. Physical iOS and Samsung TV playback remain unveri
 | `app/platform.js` | Private library and text import adapters |
 | `server/` + `scripts/serve.cjs` | Local web relay: provider URLs stay server-side, same-origin opaque media URLs, HLS rewriting and Range support; opt-in token-protected LAN cast listener |
 | `platforms/apple/Airwave.swift` | iOS/macOS SwiftUI shell, bundled WKWebView, AVPlayer and mpv playback engines with automatic selection and fallback, compact native controls, document picker, AES-GCM catalog storage with Keychain key |
+| `app/voice.js` | Samsung TV voice commands and browser voice search, turned into app commands |
+| `platforms/apple/AirwaveTV.swift` | Apple TV SwiftUI interface over the shared engines, catalog store and `core.js` (in JavaScriptCore) |
 | `app/config.xml` | Samsung TV packaging and privileges |
 
 Apple apps bundle the interface and connect directly to the provider; they do not depend on the local web server. Native catalog credentials never enter the web view. Tile artwork comes from the catalog's logos and posters (resolved natively on Apple, through the relay on the web) and from XMLTV programme icons; titles without artwork show their name on a flat tint. Live channel tiles on screen also show a still of what the channel is playing, grabbed one channel at a time and never during playback: through the relay when `ffmpeg` is installed (or `AIRWAVE_FFMPEG` points at it; `AIRWAVE_PREVIEWS=0` turns stills off), and natively with mpv on Apple. The logo stays until a still arrives or when a grab fails. The web relay keeps provider credentials out of the browser library payload. Web and Apple catalogs are private, device-local copies; there is no cloud synchronization.
@@ -34,7 +36,7 @@ npm run check
 npm run release
 ```
 
-The check runs 37 active tests plus one pending Samsung version-parity expectation. The release command creates a static runtime archive in `dist/`, with no private catalog or Node relay.
+The check runs 68 active tests plus one pending Samsung version-parity expectation. The release command creates a static runtime archive in `dist/`, with no private catalog or Node relay.
 
 ## Run the web app
 
@@ -77,8 +79,9 @@ Open `platforms/apple/Airwave.xcodeproj`. Shared schemes:
 
 - `Airwave-macOS`: macOS 13+, universal Intel/Apple Silicon.
 - `Airwave-iOS`: iPhone/iPad, iOS 16+.
+- `Airwave-tvOS`: Apple TV, tvOS 17+. A native SwiftUI interface (Home, Live TV, Movies, Favorites, Search and Settings in a left sidebar on tvOS 18+, a top tab bar on tvOS 17) over the same engines; building it needs Xcode's tvOS platform component installed.
 
-Both targets link MPVKit 1.0.0 (mpv and FFmpeg, LGPL build) through Swift Package Manager; the first build downloads its frameworks. See `NOTICE.md` for what that means for distributing a build.
+All three targets link MPVKit 1.0.0 (mpv and FFmpeg, LGPL build) through Swift Package Manager; the first build downloads its frameworks. See `NOTICE.md` for what that means for distributing a build.
 
 To time playback start-up, launch with `-AirwavePlaybackTiming YES` and watch `log stream --predicate 'subsystem == "app.airwave"'` (on the simulator, prefix `xcrun simctl spawn booted`). Each line gives the engine, live or movie, container, attempt and seconds from the play request to the first frame. It never logs URLs.
 
@@ -89,9 +92,12 @@ Select a development team and your own bundle identifiers for device distributio
 ```sh
 xcodebuild -project platforms/apple/Airwave.xcodeproj -scheme Airwave-macOS -configuration Debug -derivedDataPath build/mac CODE_SIGNING_ALLOWED=NO
 xcodebuild -project platforms/apple/Airwave.xcodeproj -scheme Airwave-iOS -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build/ios CODE_SIGNING_ALLOWED=NO
+xcodebuild -project platforms/apple/Airwave.xcodeproj -scheme Airwave-tvOS -configuration Debug -sdk appletvsimulator -destination 'generic/platform=tvOS Simulator' -derivedDataPath build/tvos CODE_SIGNING_ALLOWED=NO
 ```
 
 In the native app, Settings → Choose library file imports the private JSON catalog. It is encrypted into Application Support/Airwave/library.encrypted; the AES key is in Keychain. Move a private catalog to an iPhone only through a transfer method you trust, then use its file picker. This is a development app, not an App Store release. Store assets, privacy declarations, signing/provisioning, device testing, and distribution are separate release work.
+
+On Apple TV, Settings → Add library or playlist takes a link to an Airwave library JSON file or an M3U playlist. Hold the Siri Remote's mic to dictate it, or type it on an iPhone when the keyboard prompt appears. The library is saved encrypted in the app's Caches folder and the link in the Keychain; if tvOS clears Caches to free space, Airwave fetches the library again from that link.
 
 HTTP IPTV support currently uses an ATS exception in the Apple plist. A release must document this user-provided media use case or narrow the exception as provider support allows. No certificate validation bypass is implemented.
 
@@ -111,6 +117,9 @@ This produces a signed widget in `dist/`. Source ZIPs are not installable widget
 
 ## Features and boundaries
 
+- TV look: on Samsung TVs (and big screens with no mouse; add `?tv=1` to preview in a browser; it stays on for that browser session until `?tv=0`) the menu shrinks to the current page's name in the corner and opens over the page when you press Left, tiles and titles are sized for the couch, and the player sits on dark scrims.
+- TV remotes: on TV-sized screens the sidebar and the page are separate columns. Up and Down stay in the column, Left from the first tile opens the sidebar at the current page, Right returns to the tile you left, and reaching the end of a long grid loads more. Back steps out one level: player, dialog, page to sidebar, Home, then (on Samsung) Leave Airwave. Channel up/down changes live channels while one plays. Focus is a white fill or ring; selected filters stay outlined so the two never look alike.
+- Voice: on Samsung TVs (Tizen 6.0+), hold the remote's mic and say a title on screen ("Cinema Club", "the second one"), "pause", "skip ahead 30 seconds", "next channel", "add to favorites" or "go to search". In Chrome, the mic button in Search fills the box from speech. On Apple TV, hold the Siri Remote's mic in Search or any text field to dictate, and Siri's playback requests (pause, skip, "what did they say?") work while a title plays.
 - Library browsing, title/group search, favorites, movie progress that resumes where you stopped, one-click playback from any tile, M3U and XMLTV import, remote/keyboard navigation.
 - Sports scores: follow leagues (NFL, NBA, MLB, NHL, WNBA, MLS, college football and basketball, Premier League, Champions League) in Settings to see their games at the top of Home. Choosing a game plays the channel that the guide, the channel names or the broadcaster point to. Scores come from ESPN's public scoreboard feed and load only while a league is followed.
 - Browser and Samsung playback share one control layer: movies get a seek bar the remote scrubs (left/right to choose, OK to jump, Back to cancel), skip 10 seconds and Start over; live channels show the current programme, what is next and a Guide shortcut.
