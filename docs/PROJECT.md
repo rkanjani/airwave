@@ -94,6 +94,11 @@ AVPlayer frames of up to 960×960 through VideoToolbox's low-latency super-resol
 display layer over the player's own picture; larger, HDR and AirPlay titles keep the plain picture. Samsung remote keys are registered
 when the corresponding APIs exist. Search results start playback directly. Browser playback uses native video or HLS.js.
 Callbacks are guarded by playback generation so abandoned streams cannot restart.
+On Samsung, AVPlay starts once 4 s of media has buffered (Samsung's minimum; the default is 10 s) and shows buffering
+progress. A failed start names its cause: the provider's stream limit, an expired or rejected account, a missing
+channel, a server or network failure, or a format the TV can't decode. For links shaped `/live/<user>/<pass>/<id>`
+(also `/movie/`, `/series/` or no prefix) the cause comes from the stream host's own `player_api.php` account report;
+otherwise from the HTTP status. A refusal that is certain is shown before AVPlay opens instead of after its 30 s timeout.
 In Chrome, `app/cast.js` adds a Cast button once a device is found; while casting, the same
 controls drive the receiver and disconnecting resumes locally. iOS uses the Cast SDK's own
 button and expanded controls from the native player. macOS and Samsung do not cast.
@@ -208,6 +213,7 @@ no earlier Git history, tag, merged PR or removal record to reconstruct here.
 | 2026-10-25 | Home shows scores for sports leagues followed in Settings; choosing a game plays the matching channel | `53310bf` |
 | 2026-11-14 | TV remote navigation reworked (column-aware focus, Back to the sidebar, distinct focus and selection, ten-foot sizing, channel up/down); Samsung voice commands and browser voice search; native Apple TV app with dictation and Siri playback | branch `claude/tv-ux-voice-input-cc90b0` |
 | 2026-10-25 | Live tiles show a still of the channel, grabbed serially through the relay (ffmpeg) and natively on Apple (mpv), with the logo as fallback | `843add1` |
+| 2026-11-14 | Samsung AVPlay starts after 4 s of buffered media and explains failed starts, including a provider's stream limit | `6d12d97` |
 
 The initial import is evidence of the current implementation, not a claim that all its
 features were originally written in that commit. Pre-import observations are recorded
