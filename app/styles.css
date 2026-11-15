@@ -108,6 +108,9 @@ main{margin-left:var(--sidebar);min-height:100vh;min-width:0}
 
 /* Player */
 #player{position:fixed;z-index:20;top:0;right:0;bottom:0;left:0;background:#000}#video,#av-player{position:absolute;width:100%;height:100%;top:0;right:0;bottom:0;left:0}#av-player{display:none}body.native-player #av-player{display:block}body.native-player #video{display:none}
+/* Samsung AVPlay draws video on a plane beneath the page; every layer above it must be transparent while it plays. */
+html.video-plane,html.video-plane body,html.video-plane #player{background:transparent}
+html.video-plane #shell{visibility:hidden}
 #player-ui{position:absolute;top:0;right:0;bottom:0;left:0;transition:opacity .2s}#player-ui.hidden-controls{opacity:0;pointer-events:none}
 #player-ui:before,#player-ui:after{content:"";position:absolute;left:0;right:0;pointer-events:none}#player-ui:before{top:0;height:9.5rem;background:rgba(0,0,0,.55)}#player-ui:after{bottom:0;height:15rem;background:rgba(0,0,0,.62)}
 .player-top{position:absolute;z-index:1;top:2.5rem;left:3rem;right:3rem;display:flex;align-items:center;gap:1.25rem}.player-top .button{padding:0 1.125rem 0 .875rem}
