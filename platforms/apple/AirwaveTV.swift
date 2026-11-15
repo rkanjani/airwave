@@ -132,7 +132,8 @@ enum SourceKeychain {
     var favoriteItems: [TVItem] { let set = Set(favorites); return items.filter { set.contains($0.id) } }
     var continueWatching: [TVItem] {
         let byID = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        return history.filter { resumable($0.key) }.sorted { $0.value.updated > $1.value.updated }.compactMap { byID[$0.key] }.filter { !$0.live }
+        // Half-watched films and recently watched channels, most recent first, as on the other platforms.
+        return history.sorted { $0.value.updated > $1.value.updated }.compactMap { byID[$0.key] }.filter { $0.live || resumable($0.id) }
     }
     var recent: [TVItem] {
         let byID = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
